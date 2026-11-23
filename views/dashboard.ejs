@@ -1,0 +1,139 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<main class="contenedor">
+
+  <div class="tarjeta" style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
+    <%- include('partials/avatar', { u: yo, tam: 'lg' }) %>
+    <div style="flex:1;min-width:220px">
+      <h1 style="margin:0 0 4px">¡Hola, <%= yo.apodo || yo.nombre.split(' ')[0] %>! 👋</h1>
+      <p style="margin:0">
+        <% if (esAdmin) { %>
+          Estás dentro como <strong>administrador</strong>. Tienes todos los privilegios del intercambio.
+        <% } else if (sorteoHecho) { %>
+          El sorteo ya se realizó 🎲 Abre tu regalo y descubre a quién le toca tu sorpresa.
+        <% } else { %>
+          Bienvenido al intercambio. Faltan <strong><%= cupo.faltan %></strong> amigos para que el sorteo se haga solo.
+        <% } %>
+      </p>
+    </div>
+    <div class="contador-cupo" style="margin:0">
+      <div class="puntos">
+        <% for (let i = 0; i < cupo.max; i++) { %><span class="punto <%= i < cupo.total ? 'on' : '' %>"></span><% } %>
+      </div>
+      <strong><%= cupo.total %>/<%= cupo.max %></strong>
+    </div>
+  </div>
+
+  <% if (esAdmin) { %>
+    <div class="tarjeta">
+      <h2>⚙️ Resumen del administrador</h2>
+      <div class="metricas" style="margin-top:14px">
+        <div class="metrica"><div class="n"><%= cupo.total %></div><div class="t">Participantes</div></div>
+        <div class="metrica"><div class="n"><%= cupo.max %></div><div class="t">Cupo configurado</div></div>
+        <div class="metrica"><div class="n"><%= sorteoHecho ? 'SÍ' : 'NO' %></div><div class="t">Sorteo realizado</div></div>
+        <div class="metrica"><div class="n"><%= parejas.filter(function (p) { return p.visto; }).length %></div><div class="t">Ya vieron su amigo</div></div>
+      </div>
+      <a class="btn btn-oro" href="/admin">Abrir panel de administración</a>
+      <p class="silencio" style="margin-top:12px">Como administrador no participas en el sorteo, pero puedes ver todas las parejas, editar participantes, subir fotos y relanzar el sorteo.</p>
+    </div>
+  <% } else if (!sorteoHecho || !asignado) { %>
+    <div class="tarjeta centro">
+      <div style="font-size:4rem;animation:bamboleo 3s ease-in-out infinite">🎄</div>
+      <h2>El sorteo aún no se ha realizado</h2>
+      <p style="max-width:540px;margin:0 auto 18px">
+        Se ejecutará <strong>automáticamente</strong> en el momento exacto en que se registre el participante
+        número <strong><%= cupo.max %></strong>. Mientras esperas, completa tu perfil y cuéntale al duende
+        qué te gustaría recibir: eso ayudará a quien te saque.
+      </p>
+      <div class="acciones">
+        <a class="btn" href="/bot">🧝 Hablar con el duende</a>
+        <a class="btn btn-ghost" href="/perfil">🪪 Completar mi perfil</a>
+        <a class="btn btn-ghost" href="/participantes">👥 Ver a los amigos</a>
+      </div>
+    </div>
+  <% } else { %>
+    <div class="tarjeta">
+      <div class="escena-regalo">
+        <h2 class="centro" style="margin-bottom:0">Tu amigo secreto está dentro de esta caja 🤫</h2>
+        <p class="centro silencio" style="margin:0">
+          <%= asignado.visto ? 'Ya lo abriste antes, pero puedes verlo otra vez.' : 'Haz clic en el regalo para descubrirlo. Solo tú ves este resultado.' %>
+        </p>
+        <button class="caja <%= asignado.visto ? '' : '' %>" id="caja-regalo" aria-label="Abrir mi regalo">
+          <div class="brillo"></div>
+          <div class="cuerpo"></div>
+          <div class="tapa"></div>
+          <div class="lazo">🎀</div>
+        </button>
+        <span class="silencio">🔒 Nadie más puede ver a quién te tocó</span>
+      </div>
+
+      <div class="revelacion" id="revelacion">
+        <div class="tarjeta-amigo">
+          <div class="avatar avatar-xl" id="rev-avatar"></div>
+          <div style="flex:1;min-width:220px">
+            <div class="silencio">Tu amigo secreto es…</div>
+            <div class="quien dorado" id="rev-nombre"></div>
+            <div style="color:var(--oro-2);font-weight:600" id="rev-alias"></div>
+            <div class="chips" style="margin-top:12px">
+              <a class="chip" id="rev-link" href="#">Ver su perfil completo →</a>
+              <a class="chip" id="rev-bot" href="/bot">🧝 Pedir ideas de regalo</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="datos">
+          <div class="dato"><div class="et">Le gusta</div><div class="vl" id="rev-gustos"></div></div>
+          <div class="dato"><div class="et">Hobbies</div><div class="vl" id="rev-hobbies"></div></div>
+          <div class="dato"><div class="et">Color favorito</div><div class="vl" id="rev-color"></div></div>
+          <div class="dato"><div class="et">Tallas</div><div class="vl" id="rev-tallas"></div></div>
+        </div>
+
+        <h3 style="margin-top:20px">Sus deseos 🎁</h3>
+        <ul class="lista-deseos" id="rev-deseos"></ul>
+        <p id="rev-nogustos" style="display:none;color:#ffd4d8;margin-top:12px"></p>
+      </div>
+    </div>
+  <% } %>
+
+  <div class="tarjeta">
+    <h2>📜 Mi lista de deseos</h2>
+    <p class="silencio" style="margin-top:-4px">
+      Esta lista la ve <strong>únicamente</strong> quien te sacó en el sorteo. Agrega todo lo que se te ocurra.
+    </p>
+    <ul class="lista-deseos" id="mis-deseos">
+      <% if (misDeseos.length) { misDeseos.forEach(function (d) { %>
+        <li><%= d.texto %></li>
+      <% }); } else { %>
+        <li>Todavía no has pedido nada</li>
+      <% } %>
+    </ul>
+    <form method="post" action="/perfil/deseo" style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <input name="texto" placeholder="Ej: una manta polar" style="flex:1;min-width:200px" required>
+      <button class="btn btn-verde btn-sm" type="submit">Agregar deseo</button>
+    </form>
+  </div>
+
+  <div class="tarjeta">
+    <h2>👥 Los <%= cupo.total %> amigos del grupo</h2>
+    <p class="silencio" style="margin-top:-4px">Puedes ver el perfil de todos… pero el amigo secreto de cada uno es un misterio 🤫</p>
+    <div class="rejilla" style="margin-top:16px">
+      <% participantes.forEach(function (u) { %>
+        <a class="amigo" href="/participante/<%= u.id %>">
+          <% if (yo.id === u.id) { %><span class="insignia verde">TÚ</span><% } %>
+          <%- include('partials/avatar', { u: u, tam: 'lg' }) %>
+          <div class="nombre"><%= u.nombre %></div>
+          <% if (u.apodo) { %><div class="alias">"<%= u.apodo %>"</div><% } %>
+          <div class="mini"><%= u.gustos %></div>
+        </a>
+      <% }); %>
+      <% for (let i = 0; i < cupo.faltan; i++) { %>
+        <div class="vacante"><span>➕</span>Lugar disponible</div>
+      <% } %>
+    </div>
+  </div>
+
+</main>
+
+<%- include('partials/foot') %>

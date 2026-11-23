@@ -1,0 +1,65 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<main class="contenedor medio">
+  <p><a href="/participantes" class="silencio">← Volver a los amigos</a></p>
+
+  <div class="tarjeta">
+    <div class="tarjeta-amigo"<%- esMiAmigo ? '' : ' style="background:var(--vidrio);border-color:var(--borde)"' %>>
+      <%- include('partials/avatar', { u: u, tam: 'xl' }) %>
+      <div style="flex:1;min-width:220px">
+        <% if (esMiAmigo) { %><span class="insignia oro" style="position:static;display:inline-block;margin-bottom:8px">🎁 ES TU AMIGO SECRETO</span><% } %>
+        <% if (soyYo) { %><span class="insignia verde" style="position:static;display:inline-block;margin-bottom:8px">ESTE ERES TÚ</span><% } %>
+        <div class="quien <%= esMiAmigo ? 'dorado' : '' %>"><%= u.nombre %></div>
+        <% if (u.apodo) { %><div style="color:var(--oro-2);font-weight:600">"<%= u.apodo %>"</div><% } %>
+        <div class="silencio" style="margin-top:6px">@<%= u.usuario %></div>
+        <% if (esMiAmigo) { %>
+          <div class="chips" style="margin-top:12px">
+            <a class="chip" href="/bot">🧝 Pedir ideas de regalo para <%= (u.apodo || u.nombre.split(' ')[0]) %></a>
+          </div>
+        <% } %>
+      </div>
+    </div>
+
+    <div class="datos">
+      <div class="dato"><div class="et">Le gusta</div><div class="vl"><%= u.gustos %></div></div>
+      <div class="dato"><div class="et">Hobbies</div><div class="vl"><%= u.hobbies %></div></div>
+      <div class="dato"><div class="et">Color favorito</div><div class="vl"><%= u.color_favorito %></div></div>
+      <div class="dato"><div class="et">Talla de ropa</div><div class="vl"><%= u.talla_ropa %></div></div>
+      <div class="dato"><div class="et">Talla de zapato</div><div class="vl"><%= u.talla_zapato %></div></div>
+      <% if (u.cumple) { %><div class="dato"><div class="et">Cumpleaños</div><div class="vl"><%= u.cumple %></div></div><% } %>
+      <% if (soyYo || esAdmin) { %>
+        <div class="dato"><div class="et">Correo</div><div class="vl"><%= u.email %></div></div>
+        <div class="dato"><div class="et">Teléfono</div><div class="vl"><%= u.telefono %></div></div>
+      <% } %>
+    </div>
+
+    <% if (u.no_gustos) { %>
+      <p style="margin-top:16px;color:#ffd4d8">⚠️ <strong>No le gusta:</strong> <%= u.no_gustos %></p>
+    <% } %>
+
+    <h3 style="margin-top:22px">⭐ Sus 3 deseos</h3>
+    <ul class="lista-deseos">
+      <% [u.deseo1, u.deseo2, u.deseo3].filter(Boolean).forEach(function (d) { %><li><%= d %></li><% }); %>
+    </ul>
+
+    <% if (deseosBot.length) { %>
+      <h3 style="margin-top:22px">💬 Lo que le contó al duende</h3>
+      <p class="silencio" style="margin-top:-6px">
+        <% if (esMiAmigo) { %>Esta información es privada: la ves porque <strong>es tu amigo secreto</strong> 🤐<% } else { %>Visible solo para el administrador.<% } %>
+      </p>
+      <ul class="lista-deseos">
+        <% deseosBot.forEach(function (d) { %><li><%= d.texto %></li><% }); %>
+      </ul>
+    <% } %>
+
+    <% if (!esMiAmigo && !soyYo) { %>
+      <p class="silencio" style="margin-top:22px;padding-top:16px;border-top:1px solid var(--borde)">
+        🔒 No puedes ver a quién le tocó <%= u.apodo || u.nombre.split(' ')[0] %> — eso es parte del secreto.
+        Su lista privada del duende solo la ve quien lo sacó en el sorteo.
+      </p>
+    <% } %>
+  </div>
+</main>
+
+<%- include('partials/foot') %>

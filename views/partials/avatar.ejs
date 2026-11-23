@@ -1,0 +1,3 @@
+<div class="avatar avatar-<%= typeof tam !== 'undefined' ? tam : 'md' %>">
+  <% if (u.foto) { %><img src="<%= u.foto %>" alt="Foto de <%= u.nombre %>"><% } else { %><%= u.nombre.charAt(0).toUpperCase() %><% } %>
+</div>

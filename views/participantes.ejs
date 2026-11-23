@@ -1,0 +1,38 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<main class="contenedor">
+  <div class="tarjeta">
+    <h1>👥 Los amigos del intercambio</h1>
+    <p>
+      Aquí están los <strong><%= participantes.length %></strong> participantes.
+      Entra a cualquier perfil para ver sus gustos, tallas y deseos: eso te sirve para elegir el regalo.
+      <br><strong>Lo único que nunca verás es a quién le tocó cada uno</strong> 🤫 — ese dato solo lo conoce su dueño.
+    </p>
+    <div class="chips">
+      <span class="chip chip-estatico">🔒 Asignaciones privadas</span>
+      <span class="chip chip-estatico">💰 Monto: <%= cfg.monto %></span>
+      <span class="chip chip-estatico">🗓️ <%= cfg.fecha_evento %></span>
+    </div>
+  </div>
+
+  <div class="tarjeta">
+    <div class="rejilla">
+      <% participantes.forEach(function (u) { %>
+        <a class="amigo" href="/participante/<%= u.id %>">
+          <% if (yo.id === u.id) { %><span class="insignia verde">TÚ</span><% } %>
+          <%- include('partials/avatar', { u: u, tam: 'lg' }) %>
+          <div class="nombre"><%= u.nombre %></div>
+          <% if (u.apodo) { %><div class="alias">"<%= u.apodo %>"</div><% } %>
+          <div class="mini"><%= u.gustos %></div>
+          <div class="silencio" style="margin-top:10px;font-size:.76rem">Ropa <%= u.talla_ropa %> · Zapato <%= u.talla_zapato %></div>
+        </a>
+      <% }); %>
+      <% for (let i = 0; i < cupo.faltan; i++) { %>
+        <div class="vacante"><span>➕</span>Esperando al participante <%= cupo.total + i + 1 %></div>
+      <% } %>
+    </div>
+  </div>
+</main>
+
+<%- include('partials/foot') %>

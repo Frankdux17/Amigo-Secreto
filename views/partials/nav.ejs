@@ -1,0 +1,30 @@
+<header class="nav">
+  <a class="marca" href="<%= yo ? '/inicio' : '/' %>">
+    <span class="marca-ico">🎄</span>
+    <span class="marca-txt"><%= cfg.titulo_evento %></span>
+  </a>
+
+  <nav class="nav-links">
+    <% if (yo) { %>
+      <a href="/inicio" class="<%= ruta === '/inicio' ? 'activo' : '' %>">🏠 Inicio</a>
+      <a href="/participantes" class="<%= ruta.startsWith('/participante') ? 'activo' : '' %>">👥 Amigos</a>
+      <a href="/bot" class="<%= ruta === '/bot' ? 'activo' : '' %>">🧝 Duende</a>
+      <a href="/perfil" class="<%= ruta === '/perfil' ? 'activo' : '' %>">🪪 Mi perfil</a>
+      <% if (esAdmin) { %><a href="/admin" class="<%= ruta === '/admin' ? 'activo' : '' %>">⚙️ Admin</a><% } %>
+      <form method="post" action="/logout" class="inline">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button class="btn-link" type="submit">Salir</button>
+      </form>
+      <a href="/perfil" class="nav-avatar" title="<%= yo.nombre %>">
+        <% if (yo.foto) { %><img src="<%= yo.foto %>" alt=""><% } else { %><span><%= yo.nombre.charAt(0).toUpperCase() %></span><% } %>
+      </a>
+    <% } else { %>
+      <a href="/login" class="<%= ruta === '/login' ? 'activo' : '' %>">Ingresar</a>
+      <a href="/registro" class="btn btn-sm">Crear mi usuario</a>
+    <% } %>
+  </nav>
+</header>
+
+<% if (flash) { %>
+  <div class="flash flash-<%= flash.tipo %>" role="status"><%= flash.texto %></div>
+<% } %>

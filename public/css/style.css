@@ -1,0 +1,411 @@
+/* ==========================================================
+   Amigo Secreto Navidad — hoja de estilos
+   ========================================================== */
+:root {
+  --noche:      #0a1430;
+  --noche-2:    #0f1d44;
+  --vidrio:     rgba(255, 255, 255, .07);
+  --vidrio-2:   rgba(255, 255, 255, .12);
+  --borde:      rgba(255, 255, 255, .16);
+  --rojo:       #e63946;
+  --rojo-2:     #ff5a67;
+  --verde:      #219447;
+  --verde-2:    #379a50;
+  --lima:       #a4bf41;   /* lima corporativo */
+  --oro:        #f4c44b;
+  --oro-2:      #ffe08a;
+  --texto:      #f4f7ff;
+  --texto-2:    #b9c4e0;
+  --sombra:     0 18px 45px rgba(0, 0, 0, .45);
+  --radio:      20px;
+  --fuente:     'Public Sans', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --display:    'Baloo 2', 'Fredoka One', var(--fuente);
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--fuente);
+  color: var(--texto);
+  background:
+    radial-gradient(1100px 600px at 12% -10%, #1b2f6b 0%, transparent 60%),
+    radial-gradient(900px 500px at 88% 0%, #4a1030 0%, transparent 58%),
+    radial-gradient(700px 700px at 50% 120%, #0d3b2a 0%, transparent 60%),
+    linear-gradient(180deg, var(--noche) 0%, #070d22 100%);
+  background-attachment: fixed;
+  min-height: 100vh;
+  padding-bottom: 140px;
+  overflow-x: hidden;
+}
+
+#nieve { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+
+/* guirnalda de luces superior */
+.luces {
+  position: fixed; top: 0; left: 0; right: 0; height: 8px; z-index: 30; pointer-events: none;
+  background: repeating-linear-gradient(90deg,
+    var(--rojo) 0 14px, transparent 14px 34px,
+    var(--oro) 34px 48px, transparent 48px 68px,
+    var(--verde-2) 68px 82px, transparent 82px 102px);
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, .5));
+  animation: luces 2.4s linear infinite;
+  opacity: .95;
+}
+@keyframes luces { to { background-position: 102px 0; } }
+
+/* ---------------- navegación ---------------- */
+.nav {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  padding: 14px clamp(14px, 4vw, 40px);
+  background: rgba(8, 15, 38, .72);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--borde);
+}
+.marca { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--texto); }
+.marca-ico { font-size: 1.6rem; animation: bamboleo 3s ease-in-out infinite; }
+@keyframes bamboleo { 50% { transform: rotate(-12deg) scale(1.08); } }
+.marca-txt { font-family: var(--display); font-weight: 800; font-size: 1.15rem; letter-spacing: .2px;
+  background: linear-gradient(92deg, var(--oro-2), #fff 45%, var(--rojo-2));
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+.nav-links { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.nav-links a {
+  color: var(--texto-2); text-decoration: none; font-weight: 600; font-size: .9rem;
+  padding: 8px 12px; border-radius: 12px; transition: .18s;
+}
+.nav-links a:hover { color: #fff; background: var(--vidrio); }
+.nav-links a.activo { color: #fff; background: var(--vidrio-2); box-shadow: inset 0 0 0 1px var(--borde); }
+.nav-avatar {
+  width: 38px; height: 38px; border-radius: 50%; overflow: hidden; padding: 0 !important;
+  display: grid; place-items: center; background: linear-gradient(135deg, var(--rojo), var(--verde));
+  border: 2px solid var(--oro); font-weight: 700;
+}
+.nav-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.inline { display: inline; margin: 0; }
+.btn-link {
+  background: none; border: 0; color: var(--texto-2); font: inherit; font-weight: 600;
+  font-size: .9rem; cursor: pointer; padding: 8px 12px; border-radius: 12px;
+}
+.btn-link:hover { color: var(--rojo-2); background: var(--vidrio); }
+
+/* ---------------- contenedores ---------------- */
+.contenedor { position: relative; z-index: 10; max-width: 1180px; margin: 0 auto; padding: clamp(18px, 3vw, 34px) clamp(14px, 4vw, 28px); }
+.estrecho { max-width: 560px; }
+.medio { max-width: 880px; }
+
+.tarjeta {
+  background: var(--vidrio); border: 1px solid var(--borde); border-radius: var(--radio);
+  padding: clamp(18px, 3vw, 28px); box-shadow: var(--sombra); backdrop-filter: blur(12px);
+}
+.tarjeta + .tarjeta { margin-top: 20px; }
+
+h1, h2, h3 { font-family: var(--display); margin: 0 0 .4em; line-height: 1.15; }
+h1 { font-size: clamp(1.8rem, 4.2vw, 2.9rem); }
+h2 { font-size: clamp(1.3rem, 2.6vw, 1.75rem); }
+h3 { font-size: 1.1rem; }
+p { line-height: 1.65; color: var(--texto-2); }
+a { color: var(--oro-2); }
+.dorado { background: linear-gradient(92deg, var(--oro), #fff 50%, var(--oro)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.silencio { color: var(--texto-2); font-size: .9rem; }
+.centro { text-align: center; }
+
+/* ---------------- botones ---------------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 13px 24px; border: 0; border-radius: 999px; cursor: pointer;
+  font-family: var(--display); font-weight: 700; font-size: 1rem; color: #fff;
+  background: linear-gradient(135deg, var(--rojo), #b3202e);
+  box-shadow: 0 10px 26px rgba(230, 57, 70, .4);
+  text-decoration: none; transition: transform .15s, box-shadow .15s, filter .15s;
+}
+.btn:hover { transform: translateY(-2px); box-shadow: 0 14px 34px rgba(230, 57, 70, .55); }
+.btn:active { transform: translateY(0); }
+.btn-verde { background: linear-gradient(135deg, var(--verde-2), #16764a); box-shadow: 0 10px 26px rgba(42, 157, 92, .4); }
+.btn-oro { background: linear-gradient(135deg, var(--oro-2), #d99d1c); color: #3a2800; box-shadow: 0 10px 26px rgba(244, 196, 75, .4); }
+.btn-ghost { background: var(--vidrio-2); box-shadow: inset 0 0 0 1px var(--borde); color: var(--texto); }
+.btn-sm { padding: 9px 16px; font-size: .88rem; }
+.btn-xs { padding: 6px 12px; font-size: .78rem; border-radius: 10px; font-family: var(--fuente); font-weight: 600; }
+.btn:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+
+/* ---------------- formularios ---------------- */
+.grid-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+.campo { display: flex; flex-direction: column; gap: 6px; }
+.campo.ancho { grid-column: 1 / -1; }
+label { font-size: .84rem; font-weight: 600; color: var(--texto-2); letter-spacing: .2px; }
+label .req { color: var(--rojo-2); }
+input, select, textarea {
+  width: 100%; padding: 12px 14px; border-radius: 13px; font: inherit; font-size: .95rem;
+  color: var(--texto); background: rgba(255, 255, 255, .06);
+  border: 1px solid var(--borde); transition: .18s;
+}
+input:focus, select:focus, textarea:focus {
+  outline: 0; border-color: var(--oro); background: rgba(255, 255, 255, .11);
+  box-shadow: 0 0 0 4px rgba(244, 196, 75, .16);
+}
+textarea { resize: vertical; min-height: 78px; }
+option { background: var(--noche-2); color: var(--texto); }
+.ayuda { font-size: .78rem; color: #8e9bbd; }
+
+.errores { background: rgba(230, 57, 70, .16); border: 1px solid rgba(230, 57, 70, .5); border-radius: 14px; padding: 14px 18px; margin-bottom: 18px; }
+.errores ul { margin: 0; padding-left: 18px; }
+.errores li { color: #ffd4d8; font-size: .9rem; line-height: 1.7; }
+
+.flash {
+  position: relative; z-index: 15; max-width: 760px; margin: 14px auto 0;
+  padding: 13px 20px; border-radius: 14px; font-weight: 600; font-size: .92rem; text-align: center;
+  animation: entra .4s ease both;
+}
+.flash-ok { background: rgba(42, 157, 92, .2); border: 1px solid rgba(55, 193, 115, .55); color: #c9f7dd; }
+.flash-error { background: rgba(230, 57, 70, .18); border: 1px solid rgba(230, 57, 70, .55); color: #ffd4d8; }
+@keyframes entra { from { opacity: 0; transform: translateY(-10px); } }
+
+/* ---------------- avatar / foto ---------------- */
+.avatar {
+  border-radius: 50%; overflow: hidden; display: grid; place-items: center; flex: none;
+  background: linear-gradient(135deg, #2a3f7a, #4a1030); border: 3px solid var(--oro);
+  font-family: var(--display); font-weight: 800; color: var(--oro-2);
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.avatar-xl { width: 128px; height: 128px; font-size: 3rem; }
+.avatar-lg { width: 92px; height: 92px; font-size: 2.2rem; }
+.avatar-md { width: 64px; height: 64px; font-size: 1.5rem; }
+.avatar-sm { width: 44px; height: 44px; font-size: 1.1rem; border-width: 2px; }
+
+.foto-selector { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.foto-selector input[type=file] { display: none; }
+
+/* ---------------- hero landing ---------------- */
+.hero { position: relative; z-index: 10; text-align: center; padding: clamp(30px, 7vw, 76px) 20px 20px; }
+.hero .cinta {
+  display: inline-flex; align-items: center; gap: 8px; padding: 7px 18px; border-radius: 999px;
+  background: var(--vidrio-2); border: 1px solid var(--borde); font-size: .82rem; font-weight: 600;
+  color: var(--oro-2); margin-bottom: 18px; letter-spacing: .4px; text-transform: uppercase;
+}
+.hero h1 { font-size: clamp(2.1rem, 6.5vw, 4.1rem); margin-bottom: 14px; text-shadow: 0 6px 30px rgba(0, 0, 0, .5); }
+.hero p.lead { font-size: clamp(1rem, 2vw, 1.18rem); max-width: 640px; margin: 0 auto 28px; color: #d7e0f5; }
+.acciones { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+
+.contador-cupo {
+  display: inline-flex; align-items: center; gap: 14px; margin-top: 32px; padding: 14px 24px;
+  border-radius: 999px; background: var(--vidrio); border: 1px solid var(--borde);
+}
+.puntos { display: flex; gap: 7px; }
+.punto { width: 15px; height: 15px; border-radius: 50%; background: rgba(255, 255, 255, .16); box-shadow: inset 0 0 0 1px var(--borde); }
+.punto.on { background: linear-gradient(135deg, var(--verde-2), var(--verde)); box-shadow: 0 0 12px rgba(55, 193, 115, .8); }
+
+/* ---------------- cuadrícula de amigos ---------------- */
+.rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 18px; }
+.amigo {
+  position: relative; text-align: center; padding: 24px 16px 20px; text-decoration: none; color: inherit;
+  background: var(--vidrio); border: 1px solid var(--borde); border-radius: var(--radio);
+  transition: transform .2s, box-shadow .2s, border-color .2s; overflow: hidden; display: block;
+}
+.amigo::after {
+  content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, rgba(244, 196, 75, .14), transparent 55%);
+  opacity: 0; transition: .25s;
+}
+.amigo:hover { transform: translateY(-6px); border-color: var(--oro); box-shadow: 0 20px 40px rgba(0, 0, 0, .5); }
+.amigo:hover::after { opacity: 1; }
+.amigo .avatar { margin: 0 auto 14px; }
+.amigo .nombre { font-family: var(--display); font-weight: 700; font-size: 1.05rem; }
+.amigo .alias { font-size: .82rem; color: var(--oro-2); margin-top: 2px; }
+.amigo .mini { font-size: .8rem; color: var(--texto-2); margin-top: 8px; min-height: 2.4em;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.insignia {
+  position: absolute; top: 10px; right: 10px; font-size: .68rem; font-weight: 700; padding: 4px 9px;
+  border-radius: 999px; background: var(--rojo); color: #fff; letter-spacing: .3px; z-index: 2;
+}
+.insignia.oro { background: linear-gradient(135deg, var(--oro-2), #d99d1c); color: #3a2800; }
+.insignia.verde { background: var(--verde); }
+.vacante { display: grid; place-items: center; min-height: 190px; border: 2px dashed var(--borde);
+  border-radius: var(--radio); color: #7e8cb0; font-size: .88rem; text-align: center; gap: 6px; padding: 16px; }
+.vacante span { font-size: 2rem; opacity: .5; }
+
+/* ---------------- caja de regalo (revelación) ---------------- */
+.escena-regalo { display: grid; place-items: center; gap: 22px; padding: 10px 0 6px; }
+.caja {
+  width: 190px; height: 190px; position: relative; cursor: pointer; border: 0; background: none;
+  animation: palpita 1.9s ease-in-out infinite; transform-origin: bottom center;
+}
+@keyframes palpita { 50% { transform: scale(1.06) rotate(-2deg); } }
+.caja .cuerpo {
+  position: absolute; bottom: 0; left: 8%; width: 84%; height: 72%; border-radius: 10px;
+  background: linear-gradient(160deg, var(--rojo-2), #a8162a);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, .5), inset 0 -14px 26px rgba(0, 0, 0, .25);
+}
+.caja .cuerpo::before { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 22%;
+  transform: translateX(-50%); background: linear-gradient(180deg, var(--oro-2), var(--oro)); }
+.caja .tapa {
+  position: absolute; top: 14%; left: 0; width: 100%; height: 24%; border-radius: 9px;
+  background: linear-gradient(160deg, #ff6b78, #c81f32);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, .45);
+  transition: transform .7s cubic-bezier(.3, -0.6, .5, 1.6), opacity .7s;
+}
+.caja .tapa::before { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 20%;
+  transform: translateX(-50%); background: linear-gradient(180deg, var(--oro-2), var(--oro)); }
+.caja .lazo {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%); font-size: 2.6rem;
+  transition: transform .7s, opacity .7s; filter: drop-shadow(0 4px 8px rgba(0, 0, 0, .4));
+}
+.caja.abierta .tapa { transform: translateY(-120px) rotate(-26deg); opacity: 0; }
+.caja.abierta .lazo { transform: translate(-50%, -150px) rotate(35deg); opacity: 0; }
+.caja.abierta { animation: none; }
+.brillo {
+  position: absolute; inset: -30%; border-radius: 50%; opacity: 0; pointer-events: none;
+  background: radial-gradient(circle, rgba(255, 224, 138, .85), transparent 62%);
+  transition: opacity .6s;
+}
+.caja.abierta .brillo { opacity: 1; animation: pulso 1.6s ease-in-out infinite; }
+@keyframes pulso { 50% { transform: scale(1.12); opacity: .7; } }
+
+.revelacion { display: none; animation: aparece .7s .25s both; }
+.revelacion.visible { display: block; }
+@keyframes aparece { from { opacity: 0; transform: translateY(24px) scale(.95); } }
+
+.tarjeta-amigo {
+  display: flex; gap: 22px; align-items: center; flex-wrap: wrap;
+  padding: 24px; border-radius: var(--radio);
+  background: linear-gradient(135deg, rgba(244, 196, 75, .16), rgba(230, 57, 70, .12));
+  border: 1px solid var(--oro);
+}
+.tarjeta-amigo .avatar { border-width: 4px; }
+.tarjeta-amigo .quien { font-family: var(--display); font-size: clamp(1.5rem, 3.4vw, 2.3rem); line-height: 1.1; }
+
+.datos { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 18px; }
+.dato { background: rgba(255, 255, 255, .05); border: 1px solid var(--borde); border-radius: 14px; padding: 12px 14px; }
+.dato .et { font-size: .72rem; text-transform: uppercase; letter-spacing: .6px; color: #93a1c4; }
+.dato .vl { font-size: .95rem; font-weight: 600; margin-top: 3px; word-break: break-word; }
+
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.chip {
+  padding: 7px 14px; border-radius: 999px; font-size: .82rem; font-weight: 600; cursor: pointer;
+  background: var(--vidrio-2); border: 1px solid var(--borde); color: var(--texto); transition: .16s;
+}
+.chip:hover { background: var(--oro); color: #3a2800; border-color: var(--oro); }
+.chip-estatico { cursor: default; background: rgba(55, 193, 115, .16); border-color: rgba(55, 193, 115, .5); }
+.chip-estatico:hover { background: rgba(55, 193, 115, .16); color: var(--texto); }
+
+.lista-deseos { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 8px; }
+.lista-deseos li {
+  display: flex; align-items: center; gap: 10px; padding: 11px 15px; border-radius: 13px;
+  background: rgba(255, 255, 255, .05); border: 1px solid var(--borde); font-size: .93rem;
+}
+.lista-deseos li::before { content: '🎁'; }
+
+/* ---------------- bot ---------------- */
+.bot-wrap { display: grid; grid-template-columns: 1.6fr 1fr; gap: 20px; align-items: start; }
+.chat { display: flex; flex-direction: column; height: min(66vh, 580px); padding: 0; overflow: hidden; }
+.chat-cab {
+  display: flex; align-items: center; gap: 12px; padding: 16px 20px;
+  border-bottom: 1px solid var(--borde); background: rgba(255, 255, 255, .05);
+}
+.chat-cab .duende { font-size: 2rem; animation: bamboleo 2.6s ease-in-out infinite; }
+.chat-cab b { font-family: var(--display); font-size: 1.05rem; }
+.estado-on { font-size: .76rem; color: var(--verde-2); display: flex; align-items: center; gap: 5px; }
+.estado-on::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--verde-2); box-shadow: 0 0 8px var(--verde-2); }
+.chat-cuerpo { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; scroll-behavior: smooth; }
+.msj { max-width: 86%; padding: 12px 16px; border-radius: 18px; font-size: .92rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word; animation: entra .3s both; }
+.msj.bot { align-self: flex-start; background: rgba(255, 255, 255, .08); border: 1px solid var(--borde); border-bottom-left-radius: 6px; }
+.msj.user { align-self: flex-end; background: linear-gradient(135deg, var(--verde-2), #16764a); border-bottom-right-radius: 6px; color: #fff; }
+.msj.escribiendo { color: var(--texto-2); font-style: italic; }
+.chat-pie { display: flex; gap: 10px; padding: 14px; border-top: 1px solid var(--borde); background: rgba(255, 255, 255, .04); }
+.chat-pie input { border-radius: 999px; }
+.chat-pie .btn { padding: 12px 20px; }
+.chat-cuerpo::-webkit-scrollbar { width: 8px; }
+.chat-cuerpo::-webkit-scrollbar-thumb { background: var(--vidrio-2); border-radius: 8px; }
+
+/* ---------------- tablas admin ---------------- */
+.tabla-wrap { overflow-x: auto; border-radius: 16px; border: 1px solid var(--borde); }
+table { width: 100%; border-collapse: collapse; font-size: .88rem; min-width: 620px; }
+th, td { padding: 11px 14px; text-align: left; border-bottom: 1px solid rgba(255, 255, 255, .08); vertical-align: middle; }
+th { background: rgba(255, 255, 255, .07); font-size: .76rem; text-transform: uppercase; letter-spacing: .6px; color: #a9b6d6; }
+tbody tr:hover { background: rgba(255, 255, 255, .04); }
+td form { display: inline; }
+.acciones-fila { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.metricas { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.metrica { background: var(--vidrio); border: 1px solid var(--borde); border-radius: 16px; padding: 16px 18px; }
+.metrica .n { font-family: var(--display); font-size: 2rem; line-height: 1; }
+.metrica .t { font-size: .78rem; text-transform: uppercase; letter-spacing: .6px; color: #93a1c4; margin-top: 6px; }
+
+details.bloque { background: var(--vidrio); border: 1px solid var(--borde); border-radius: 16px; padding: 14px 18px; margin-top: 14px; }
+details.bloque summary { cursor: pointer; font-family: var(--display); font-weight: 700; font-size: 1rem; }
+details.bloque[open] summary { margin-bottom: 14px; }
+
+.pasos { counter-reset: p; list-style: none; padding: 0; display: grid; gap: 14px; }
+.pasos li { counter-increment: p; position: relative; padding-left: 52px; color: var(--texto-2); line-height: 1.6; }
+.pasos li::before {
+  content: counter(p); position: absolute; left: 0; top: -2px; width: 34px; height: 34px;
+  display: grid; place-items: center; border-radius: 50%; font-family: var(--display); font-weight: 800;
+  background: linear-gradient(135deg, var(--rojo), var(--verde)); color: #fff;
+}
+.pasos li b { color: var(--texto); }
+
+/* ---------------- desfile de Papá Noel ---------------- */
+.desfile { position: fixed; left: 0; right: 0; bottom: 0; height: 132px; z-index: 12; pointer-events: none; overflow: hidden; }
+.desfile-piso {
+  position: absolute; bottom: 0; left: 0; right: 0; height: 34px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .9), rgba(210, 228, 255, .55));
+  border-top-left-radius: 50% 18px; border-top-right-radius: 50% 18px;
+  box-shadow: 0 -8px 24px rgba(255, 255, 255, .18);
+}
+.caminante { position: absolute; bottom: 20px; left: -220px; display: flex; align-items: flex-end; gap: 6px; will-change: transform; }
+.personaje { font-size: 3.1rem; line-height: 1; filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .45)); animation: pasos .5s ease-in-out infinite alternate; }
+@keyframes pasos { from { transform: translateY(0) rotate(-4deg); } to { transform: translateY(-9px) rotate(4deg); } }
+.trineo { display: flex; flex-direction: column; align-items: center; gap: 4px; animation: pasos .5s .18s ease-in-out infinite alternate; }
+.marco-foto {
+  width: 62px; height: 62px; border-radius: 14px; overflow: hidden; display: grid; place-items: center;
+  background: linear-gradient(135deg, #2a3f7a, #4a1030); border: 3px solid var(--oro);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, .5); font-size: 1.6rem;
+}
+.marco-foto img { width: 100%; height: 100%; object-fit: cover; }
+.trineo-nombre {
+  font-family: var(--display); font-weight: 700; font-size: .72rem; padding: 2px 10px; border-radius: 999px;
+  background: rgba(10, 20, 48, .88); border: 1px solid var(--oro); color: var(--oro-2); white-space: nowrap;
+}
+.globo {
+  position: absolute; bottom: 92px; left: 10px; max-width: 230px; padding: 9px 14px; border-radius: 14px;
+  background: #fff; color: #11204a; font-size: .78rem; font-weight: 600; line-height: 1.45;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .35); opacity: 0; transition: opacity .4s; pointer-events: none;
+}
+.globo::after { content: ''; position: absolute; bottom: -8px; left: 22px; border: 8px solid transparent; border-top-color: #fff; border-bottom: 0; }
+.globo.ver { opacity: 1; }
+
+.pie {
+  position: relative; z-index: 10; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+  padding: 26px 20px 30px; font-size: .82rem; color: #8e9bbd;
+}
+.pie strong { color: var(--oro-2); }
+
+/* confeti */
+.confeti { position: fixed; inset: 0; pointer-events: none; z-index: 40; }
+.confeti i {
+  position: absolute; width: 9px; height: 14px; border-radius: 2px; opacity: .95;
+  animation: cae linear forwards;
+}
+@keyframes cae { to { transform: translateY(105vh) rotate(760deg); opacity: 0; } }
+
+/* ---------------- responsive ---------------- */
+@media (max-width: 880px) {
+  .bot-wrap { grid-template-columns: 1fr; }
+  .marca-txt { display: none; }
+  .nav-links a { padding: 7px 9px; font-size: .84rem; }
+}
+@media (max-width: 560px) {
+  body { padding-bottom: 125px; }
+  .tarjeta-amigo { justify-content: center; text-align: center; }
+  .rejilla { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .avatar-xl { width: 100px; height: 100px; font-size: 2.4rem; }
+  .globo { max-width: 180px; font-size: .72rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .001s !important; animation-iteration-count: 1 !important; }
+  .desfile { display: none; }
+}
+
+/* input de archivo oculto en bloques de foto */
+[data-foto] input[type=file] { display: none; }

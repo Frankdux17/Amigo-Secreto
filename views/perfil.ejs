@@ -1,0 +1,143 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+<% const v = (k) => (datos && datos[k] != null) ? datos[k] : ''; %>
+
+<main class="contenedor medio">
+  <div class="tarjeta">
+    <h1>🪪 Mi perfil</h1>
+    <p class="silencio" style="margin-top:-6px">
+      Mantén tus datos al día: quien te sacó en el sorteo los usa para elegir tu regalo.
+      Los campos con <span class="req">*</span> son obligatorios.
+    </p>
+
+    <% if (errores && errores.length) { %>
+      <div class="errores" style="margin-top:16px">
+        <strong>Revisa estos puntos:</strong>
+        <ul><% errores.forEach(function (e) { %><li><%= e %></li><% }); %></ul>
+      </div>
+    <% } %>
+
+    <form method="post" action="/perfil" autocomplete="off">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+      <div class="foto-selector" data-foto style="margin:18px 0">
+        <div class="avatar avatar-lg">
+          <% if (datos.foto) { %><img src="<%= datos.foto %>" alt=""><% } else { %><%= datos.nombre.charAt(0).toUpperCase() %><% } %>
+        </div>
+        <div>
+          <label class="btn btn-ghost btn-sm" for="archivo-foto">📷 Cambiar mi foto</label>
+          <input id="archivo-foto" type="file" accept="image/*">
+          <input type="hidden" class="foto-datos" name="foto" value="">
+          <div class="ayuda foto-info">Si no eliges nada, se mantiene la foto actual.</div>
+        </div>
+      </div>
+
+      <div class="grid-form">
+        <div class="campo">
+          <label>Usuario</label>
+          <input value="<%= datos.usuario %>" disabled>
+          <span class="ayuda">El usuario no se puede cambiar.</span>
+        </div>
+        <div class="campo">
+          <label for="nombre">Nombre y apellido <span class="req">*</span></label>
+          <input id="nombre" name="nombre" required value="<%= v('nombre') %>">
+        </div>
+        <div class="campo">
+          <label for="apodo">Apodo</label>
+          <input id="apodo" name="apodo" value="<%= v('apodo') %>">
+        </div>
+        <div class="campo">
+          <label for="email">Correo electrónico <span class="req">*</span></label>
+          <input id="email" name="email" type="email" required value="<%= v('email') %>">
+        </div>
+        <div class="campo">
+          <label for="telefono">Teléfono / WhatsApp <span class="req">*</span></label>
+          <input id="telefono" name="telefono" required value="<%= v('telefono') %>">
+        </div>
+        <div class="campo">
+          <label for="cumple">Cumpleaños</label>
+          <input id="cumple" name="cumple" type="date" value="<%= v('cumple') %>">
+        </div>
+        <div class="campo">
+          <label for="direccion">Dirección o referencia</label>
+          <input id="direccion" name="direccion" value="<%= v('direccion') %>">
+        </div>
+        <div class="campo ancho">
+          <label for="gustos">¿Qué te gusta? <span class="req">*</span></label>
+          <textarea id="gustos" name="gustos" required><%= v('gustos') %></textarea>
+        </div>
+        <div class="campo ancho">
+          <label for="hobbies">Hobbies <span class="req">*</span></label>
+          <textarea id="hobbies" name="hobbies" required><%= v('hobbies') %></textarea>
+        </div>
+        <div class="campo ancho">
+          <label for="no_gustos">¿Qué NO te gusta?</label>
+          <textarea id="no_gustos" name="no_gustos"><%= v('no_gustos') %></textarea>
+        </div>
+        <div class="campo">
+          <label for="talla_ropa">Talla de ropa <span class="req">*</span></label>
+          <select id="talla_ropa" name="talla_ropa" required>
+            <% ['XS','S','M','L','XL','XXL','XXXL'].forEach(function (t) { %>
+              <option value="<%= t %>" <%= v('talla_ropa') === t ? 'selected' : '' %>><%= t %></option>
+            <% }); %>
+          </select>
+        </div>
+        <div class="campo">
+          <label for="talla_zapato">Talla de zapato <span class="req">*</span></label>
+          <input id="talla_zapato" name="talla_zapato" required value="<%= v('talla_zapato') %>">
+        </div>
+        <div class="campo">
+          <label for="color_favorito">Color favorito <span class="req">*</span></label>
+          <input id="color_favorito" name="color_favorito" required value="<%= v('color_favorito') %>">
+        </div>
+        <div class="campo ancho">
+          <label for="deseo1">Deseo principal <span class="req">*</span></label>
+          <input id="deseo1" name="deseo1" required value="<%= v('deseo1') %>">
+        </div>
+        <div class="campo">
+          <label for="deseo2">Segundo deseo</label>
+          <input id="deseo2" name="deseo2" value="<%= v('deseo2') %>">
+        </div>
+        <div class="campo">
+          <label for="deseo3">Tercer deseo</label>
+          <input id="deseo3" name="deseo3" value="<%= v('deseo3') %>">
+        </div>
+      </div>
+
+      <details class="bloque">
+        <summary>🔐 Cambiar mi contraseña</summary>
+        <div class="grid-form">
+          <div class="campo">
+            <label for="password">Nueva contraseña</label>
+            <input id="password" name="password" type="password" minlength="6" placeholder="mínimo 6 caracteres">
+          </div>
+          <div class="campo">
+            <label for="password2">Repetir nueva contraseña</label>
+            <input id="password2" name="password2" type="password" minlength="6">
+          </div>
+        </div>
+        <p class="ayuda">Deja ambos campos vacíos si no quieres cambiarla.</p>
+      </details>
+
+      <button class="btn btn-verde" style="width:100%;margin-top:22px" type="submit">💾 Guardar mis datos</button>
+    </form>
+  </div>
+
+  <div class="tarjeta">
+    <h2>📜 Mi lista de deseos</h2>
+    <p class="silencio" style="margin-top:-4px">Solo la ve quien te sacó en el sorteo. También puedes llenarla conversando con el duende.</p>
+    <ul class="lista-deseos">
+      <% if (misDeseos.length) { misDeseos.forEach(function (d) { %><li><%= d.texto %></li><% }); } else { %>
+        <li>Todavía no has pedido nada</li>
+      <% } %>
+    </ul>
+    <form method="post" action="/perfil/deseo" style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <input name="texto" placeholder="Ej: un set de café" style="flex:1;min-width:200px" required>
+      <button class="btn btn-sm" type="submit">Agregar</button>
+    </form>
+    <a class="btn btn-ghost btn-sm" href="/bot" style="margin-top:12px">🧝 Conversar con el duende</a>
+  </div>
+</main>
+
+<%- include('partials/foot') %>

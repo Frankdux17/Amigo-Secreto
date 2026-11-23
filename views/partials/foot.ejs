@@ -1,0 +1,82 @@
+<div class="desfile" aria-hidden="true">
+  <div class="desfile-piso"></div>
+  <div class="caminante" id="caminante">
+    <div class="globo" id="globo-caminante"></div>
+    <div class="personaje" id="personaje">🎅</div>
+    <div class="trineo">
+      <div class="marco-foto" id="marco-foto"></div>
+      <div class="trineo-nombre" id="trineo-nombre"></div>
+    </div>
+  </div>
+</div>
+
+<footer class="pie">
+  <span>🎁 <%= cfg.titulo_evento %></span>
+  <span>·</span>
+  <span>Monto sugerido: <strong><%= cfg.monto %></strong></span>
+  <span>·</span>
+  <span>Fecha: <strong><%= cfg.fecha_evento %></strong></span>
+  <% if (cfg.lugar) { %><span>·</span><span>Lugar: <strong><%= cfg.lugar %></strong></span><% } %>
+</footer>
+
+<% if (yo) { %>
+<!-- ============ DUENDE FLOTANTE (asistente animado) ============ -->
+<div class="duende-widget" id="duende-widget">
+
+  <div class="duende-globo" id="duende-globo" role="status">
+    <button class="duende-globo-x" id="duende-globo-x" aria-label="Cerrar aviso">×</button>
+    <span id="duende-globo-txt"></span>
+  </div>
+
+  <button class="duende-lanzador" id="duende-lanzador" aria-label="Abrir el asistente de regalos">
+    <span class="duende-aura"></span>
+    <span class="duende-punto" id="duende-punto"></span>
+    <%- include('duende-svg') %>
+  </button>
+
+  <section class="duende-panel" id="duende-panel" aria-label="Asistente de regalos">
+    <header class="duende-panel-cab">
+      <div class="duende-mini"><%- include('duende-svg') %></div>
+      <div style="flex:1">
+        <b>Duende Ayudante</b>
+        <div class="estado-on">en línea · experto en regalos</div>
+      </div>
+      <button class="duende-cerrar" id="duende-cerrar" aria-label="Cerrar">×</button>
+    </header>
+
+    <div class="duende-msjs" id="duende-msjs"></div>
+
+    <div class="duende-sugerencias" id="duende-sugerencias"></div>
+
+    <form class="duende-pie" id="duende-form" autocomplete="off">
+      <input id="duende-input" placeholder="Escribe aquí…" maxlength="500" required>
+      <button class="duende-enviar" id="duende-enviar" type="submit" aria-label="Enviar">➤</button>
+    </form>
+  </section>
+</div>
+
+<!-- ============ AVISO AUTOMÁTICO DEL SORTEO ============ -->
+<div class="sorpresa" id="sorpresa" role="dialog" aria-modal="true" aria-labelledby="sorpresa-titulo">
+  <div class="sorpresa-caja">
+    <button class="sorpresa-x" id="sorpresa-x" aria-label="Cerrar">×</button>
+    <div class="sorpresa-cinta">🎲 ¡El sorteo ya se realizó!</div>
+    <h2 id="sorpresa-titulo">Tu amigo secreto es…</h2>
+    <div class="sorpresa-avatar" id="sorpresa-avatar"></div>
+    <div class="sorpresa-nombre dorado" id="sorpresa-nombre"></div>
+    <div class="sorpresa-alias" id="sorpresa-alias"></div>
+    <p class="sorpresa-gustos" id="sorpresa-gustos"></p>
+    <div class="sorpresa-acciones">
+      <a class="btn btn-sm" id="sorpresa-perfil" href="#">Ver su perfil completo</a>
+      <button class="btn btn-ghost btn-sm" id="sorpresa-ideas" type="button">🧝 Pedir ideas de regalo</button>
+    </div>
+    <span class="sorpresa-nota">🔒 Solo tú ves esto. Nadie sabe a quién le tocó cada uno.</span>
+  </div>
+</div>
+<% } %>
+
+<script id="datos-caminata" type="application/json"><%- JSON.stringify(caminata || []) %></script>
+<script>window.CSRF = '<%= csrfToken %>'; window.HAY_SESION = <%= yo ? 'true' : 'false' %>;</script>
+<script src="/js/app.js"></script>
+<script src="/js/duende.js"></script>
+</body>
+</html>

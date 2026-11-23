@@ -1,0 +1,235 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+<% const participantes = usuarios.filter(function (u) { return u.rol === 'participante'; }); %>
+
+<main class="contenedor">
+  <div class="tarjeta">
+    <h1>⚙️ Panel de administración</h1>
+    <p class="silencio" style="margin-top:-6px">
+      Control total del intercambio: configuración, sorteo, participantes, fotos y credenciales.
+      Tú eres el usuario <strong>nº <%= cupo.max + 1 %></strong>: administras pero
+      <strong>no entras al sorteo</strong>, que se juega solo entre los <%= cupo.max %> participantes registrados.
+    </p>
+    <div class="metricas" style="margin-top:16px">
+      <div class="metrica"><div class="n"><%= participantes.length %>/<%= cupo.max %></div><div class="t">Participantes</div></div>
+      <div class="metrica"><div class="n"><%= sorteoHecho ? '✅' : '⏳' %></div><div class="t">Sorteo <%= sorteoHecho ? 'realizado' : 'pendiente' %></div></div>
+      <div class="metrica"><div class="n"><%= parejas.filter(function (p) { return p.visto; }).length %></div><div class="t">Ya abrieron su regalo</div></div>
+      <div class="metrica"><div class="n"><%= participantes.filter(function (u) { return u.foto; }).length %></div><div class="t">Con foto</div></div>
+      <div class="metrica"><div class="n"><%= cfg.ronda_actual %></div><div class="t">Ronda de sorteo</div></div>
+    </div>
+  </div>
+
+  <div class="tarjeta">
+    <h2>🎲 Sorteo</h2>
+    <p class="silencio" style="margin-top:-6px">
+      El sorteo se dispara <strong>solo</strong> cuando se registra el participante número <%= cupo.max %>.
+      También puedes forzarlo desde aquí (por ejemplo, para hacer una nueva ronda).
+      <% if (cfg.fecha_sorteo) { %><br>Último sorteo: <strong><%= cfg.fecha_sorteo %></strong><% } %>
+    </p>
+    <div class="acciones" style="justify-content:flex-start;margin-top:14px">
+      <form method="post" action="/admin/sorteo" class="inline">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button class="btn btn-verde btn-sm" type="submit">Ejecutar sorteo (si está completo)</button>
+      </form>
+      <form method="post" action="/admin/sorteo" class="inline" data-confirmar="¿Forzar un nuevo sorteo? Se generarán nuevas parejas y las anteriores quedarán sin efecto.">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <input type="hidden" name="forzar" value="1">
+        <button class="btn btn-oro btn-sm" type="submit">⚡ Forzar sorteo / nueva ronda</button>
+      </form>
+      <form method="post" action="/admin/reiniciar" class="inline" data-confirmar="¿Borrar todas las asignaciones? Nadie tendrá amigo secreto hasta que vuelvas a sortear.">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button class="btn btn-ghost btn-sm" type="submit">🗑️ Reiniciar sorteo</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="tarjeta">
+    <h2>🔧 Configuración del evento</h2>
+    <form method="post" action="/admin/config">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <div class="grid-form">
+        <div class="campo">
+          <label for="titulo_evento">Título del evento</label>
+          <input id="titulo_evento" name="titulo_evento" value="<%= cfg.titulo_evento %>">
+        </div>
+        <div class="campo">
+          <label for="max_participantes">Número de participantes</label>
+          <input id="max_participantes" name="max_participantes" type="number" min="3" max="100" value="<%= cfg.max_participantes %>">
+          <span class="ayuda">Al llegar a este número, el sorteo se ejecuta solo.</span>
+        </div>
+        <div class="campo">
+          <label for="monto">Monto sugerido del regalo</label>
+          <input id="monto" name="monto" value="<%= cfg.monto %>">
+        </div>
+        <div class="campo">
+          <label for="fecha_evento">Fecha del intercambio</label>
+          <input id="fecha_evento" name="fecha_evento" value="<%= cfg.fecha_evento %>">
+        </div>
+        <div class="campo ancho">
+          <label for="lugar">Lugar</label>
+          <input id="lugar" name="lugar" value="<%= cfg.lugar %>">
+        </div>
+      </div>
+      <button class="btn btn-sm" style="margin-top:16px" type="submit">💾 Guardar configuración</button>
+    </form>
+  </div>
+
+  <div class="tarjeta">
+    <h2>🤫 Parejas del sorteo <span class="silencio" style="font-size:.8rem">(solo tú ves esto)</span></h2>
+    <% if (!parejas.length) { %>
+      <p class="silencio">Aún no hay asignaciones. Ejecuta el sorteo cuando se complete el cupo.</p>
+    <% } else { %>
+      <div class="tabla-wrap" style="margin-top:14px">
+        <table>
+          <thead><tr><th>Regala</th><th></th><th>Recibe</th><th>¿Ya lo vio?</th></tr></thead>
+          <tbody>
+            <% parejas.forEach(function (p) { %>
+              <tr>
+                <td>
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <div class="avatar avatar-sm"><% if (p.dador_foto) { %><img src="<%= p.dador_foto %>" alt=""><% } else { %><%= p.dador.charAt(0) %><% } %></div>
+                    <div><strong><%= p.dador %></strong><div class="silencio" style="font-size:.76rem">@<%= p.dador_usuario %></div></div>
+                  </div>
+                </td>
+                <td style="font-size:1.2rem">➜</td>
+                <td>
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <div class="avatar avatar-sm"><% if (p.recibe_foto) { %><img src="<%= p.recibe_foto %>" alt=""><% } else { %><%= p.recibe.charAt(0) %><% } %></div>
+                    <div><strong><%= p.recibe %></strong><div class="silencio" style="font-size:.76rem">@<%= p.recibe_usuario %></div></div>
+                  </div>
+                </td>
+                <td><%= p.visto ? '✅ Sí' : '⏳ No' %></td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  </div>
+
+  <div class="tarjeta">
+    <h2>👥 Participantes</h2>
+    <div class="tabla-wrap" style="margin-top:14px">
+      <table>
+        <thead><tr><th>#</th><th>Participante</th><th>Contacto</th><th>Tallas</th><th>Estado</th><th>Acciones</th></tr></thead>
+        <tbody>
+          <% usuarios.forEach(function (u, i) { %>
+            <tr>
+              <td><%= i + 1 %></td>
+              <td>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <div class="avatar avatar-sm"><% if (u.foto) { %><img src="<%= u.foto %>" alt=""><% } else { %><%= u.nombre.charAt(0) %><% } %></div>
+                  <div>
+                    <strong><%= u.nombre %></strong>
+                    <% if (u.rol === 'admin') { %><span class="insignia oro" style="position:static;margin-left:6px">ADMIN</span><% } %>
+                    <div class="silencio" style="font-size:.76rem">@<%= u.usuario %><%= u.apodo ? ' · "' + u.apodo + '"' : '' %></div>
+                  </div>
+                </div>
+              </td>
+              <td><div style="font-size:.8rem"><%= u.email %><br><%= u.telefono %></div></td>
+              <td><div style="font-size:.8rem">Ropa <%= u.talla_ropa %><br>Zapato <%= u.talla_zapato %></div></td>
+              <td><%= u.activo ? '🟢 Activo' : '🔴 Inactivo' %></td>
+              <td>
+                <div class="acciones-fila">
+                  <form method="post" action="/admin/usuario/<%= u.id %>/foto" class="inline" data-foto>
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <input type="hidden" class="foto-datos" name="foto" value="">
+                    <label class="btn btn-xs btn-ghost">📷 Foto<input type="file" accept="image/*" style="display:none"></label>
+                    <button class="btn btn-xs btn-ghost" type="submit">Subir</button>
+                  </form>
+                  <% if (u.rol !== 'admin') { %>
+                    <form method="post" action="/admin/usuario/<%= u.id %>/estado" class="inline">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                      <button class="btn btn-xs btn-ghost" type="submit"><%= u.activo ? 'Desactivar' : 'Activar' %></button>
+                    </form>
+                    <form method="post" action="/admin/usuario/<%= u.id %>/eliminar" class="inline" data-confirmar="¿Eliminar a <%= u.nombre %>? Si ya había sorteo, se reiniciará.">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                      <button class="btn btn-xs" type="submit">Eliminar</button>
+                    </form>
+                  <% } %>
+                </div>
+              </td>
+            </tr>
+          <% }); %>
+        </tbody>
+      </table>
+    </div>
+
+    <% usuarios.forEach(function (u) { %>
+      <details class="bloque">
+        <summary>✏️ Editar datos de <%= u.nombre %> (@<%= u.usuario %>)</summary>
+        <form method="post" action="/admin/usuario/<%= u.id %>/editar">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <div class="grid-form">
+            <div class="campo"><label>Nombre</label><input name="nombre" value="<%= u.nombre %>"></div>
+            <div class="campo"><label>Apodo</label><input name="apodo" value="<%= u.apodo || '' %>"></div>
+            <div class="campo"><label>Correo</label><input name="email" value="<%= u.email %>"></div>
+            <div class="campo"><label>Teléfono</label><input name="telefono" value="<%= u.telefono %>"></div>
+            <div class="campo"><label>Talla ropa</label><input name="talla_ropa" value="<%= u.talla_ropa %>"></div>
+            <div class="campo"><label>Talla zapato</label><input name="talla_zapato" value="<%= u.talla_zapato %>"></div>
+            <div class="campo"><label>Color favorito</label><input name="color_favorito" value="<%= u.color_favorito %>"></div>
+            <div class="campo ancho"><label>Gustos</label><textarea name="gustos"><%= u.gustos %></textarea></div>
+            <div class="campo ancho"><label>Hobbies</label><textarea name="hobbies"><%= u.hobbies %></textarea></div>
+            <div class="campo ancho"><label>No le gusta</label><textarea name="no_gustos"><%= u.no_gustos || '' %></textarea></div>
+            <div class="campo ancho"><label>Deseo 1</label><input name="deseo1" value="<%= u.deseo1 %>"></div>
+            <div class="campo"><label>Deseo 2</label><input name="deseo2" value="<%= u.deseo2 || '' %>"></div>
+            <div class="campo"><label>Deseo 3</label><input name="deseo3" value="<%= u.deseo3 || '' %>"></div>
+          </div>
+          <button class="btn btn-sm" style="margin-top:14px" type="submit">💾 Guardar cambios</button>
+        </form>
+        <form method="post" action="/admin/usuario/<%= u.id %>/credenciales" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--borde)">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <h3 style="font-size:.95rem;margin-bottom:10px">🔐 Credenciales (si olvidó su clave o quiere cambiar de usuario)</h3>
+          <div class="grid-form">
+            <div class="campo">
+              <label>Nombre de usuario</label>
+              <input name="usuario" value="<%= u.usuario %>" pattern="[a-zA-Z0-9._-]{3,20}">
+              <span class="ayuda">Cámbialo solo si lo pide. Debe ser único.</span>
+            </div>
+            <div class="campo">
+              <label>Nueva contraseña</label>
+              <input name="password" type="text" placeholder="déjalo vacío para no cambiarla">
+              <span class="ayuda">Mínimo 6 caracteres. Se la comunicas tú.</span>
+            </div>
+          </div>
+          <button class="btn btn-ghost btn-sm" style="margin-top:12px" type="submit">🔐 Actualizar credenciales</button>
+        </form>
+      </details>
+    <% }); %>
+  </div>
+
+  <div class="tarjeta">
+    <h2>➕ Agregar participante manualmente</h2>
+    <p class="silencio" style="margin-top:-6px">Útil si alguien no puede registrarse solo. Todos los campos son obligatorios.</p>
+    <form method="post" action="/admin/usuario/nuevo">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <div class="grid-form">
+        <div class="campo"><label>Usuario *</label><input name="usuario" required></div>
+        <div class="campo"><label>Contraseña *</label><input name="password" required minlength="6"></div>
+        <div class="campo"><label>Nombre y apellido *</label><input name="nombre" required></div>
+        <div class="campo"><label>Correo *</label><input name="email" type="email" required></div>
+        <div class="campo"><label>Teléfono *</label><input name="telefono" required></div>
+        <div class="campo"><label>Talla ropa *</label><input name="talla_ropa" required placeholder="M"></div>
+        <div class="campo"><label>Talla zapato *</label><input name="talla_zapato" required placeholder="40"></div>
+        <div class="campo"><label>Color favorito *</label><input name="color_favorito" required></div>
+        <div class="campo ancho"><label>Gustos *</label><input name="gustos" required></div>
+        <div class="campo ancho"><label>Hobbies *</label><input name="hobbies" required></div>
+        <div class="campo ancho"><label>Deseo principal *</label><input name="deseo1" required></div>
+      </div>
+      <button class="btn btn-verde btn-sm" style="margin-top:16px" type="submit">Crear participante</button>
+    </form>
+  </div>
+
+  <div class="tarjeta">
+    <h2>🗄️ Base de datos</h2>
+    <p class="silencio" style="margin-top:-6px">
+      Todo se guarda en un archivo SQLite dentro del proyecto:
+    </p>
+    <code style="display:block;padding:12px 14px;background:rgba(0,0,0,.35);border-radius:12px;font-size:.82rem;word-break:break-all"><%= dbFile %></code>
+    <p class="ayuda" style="margin-top:10px">
+      Puedes copiar ese archivo para respaldar todo el intercambio (usuarios, fotos, sorteo y conversaciones del duende).
+    </p>
+  </div>
+</main>
+
+<%- include('partials/foot') %>

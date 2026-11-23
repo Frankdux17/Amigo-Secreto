@@ -1,0 +1,81 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<main class="contenedor">
+  <div class="bot-wrap">
+
+    <div class="tarjeta chat">
+      <div class="chat-cab">
+        <span class="duende">🧝</span>
+        <div style="flex:1">
+          <b>Duende Ayudante</b>
+          <div class="estado-on">en línea · experto en regalos</div>
+        </div>
+      </div>
+
+      <div class="chat-cuerpo" id="chat-cuerpo">
+        <% if (!historial.length) { %>
+          <div class="msj bot">¡Hola, <%= yo.apodo || yo.nombre.split(' ')[0] %>! 🎅 Soy el Duende Ayudante.
+
+Puedo ayudarte con dos cosas:
+
+1) <strong>Buscar el mejor regalo para tu amigo secreto</strong> — dime sus gustos o pregúntame directamente y reviso su perfil.
+2) <strong>Anotar lo que TÚ quieres recibir</strong> — escribe "quiero ..." y lo guardo. Quien te sacó podrá verlo.
+
+¿Qué te gustaría pedir esta Navidad?</div>
+        <% } %>
+        <% historial.forEach(function (m) { %>
+          <div class="msj <%= m.rol === 'user' ? 'user' : 'bot' %>"><%= m.mensaje %></div>
+        <% }); %>
+      </div>
+
+      <form class="chat-pie" id="chat-form" autocomplete="off">
+        <input id="chat-input" name="texto" placeholder="Escribe aquí… ej: quiero unos audífonos" maxlength="500" required>
+        <button class="btn btn-sm" id="chat-btn" type="submit">Enviar</button>
+      </form>
+    </div>
+
+    <div>
+      <div class="tarjeta">
+        <h3>⚡ Pregúntame rápido</h3>
+        <div class="chips">
+          <% if (tieneAmigo) { %>
+            <span class="chip" data-enviar="¿Qué le regalo a mi amigo secreto?">🎁 ¿Qué le regalo a mi amigo?</span>
+            <span class="chip" data-enviar="A mi amigo secreto le gusta algo más? dame más ideas">💡 Más ideas para él/ella</span>
+          <% } else { %>
+            <span class="chip" data-enviar="¿Quién es mi amigo secreto?">🤫 ¿Quién es mi amigo?</span>
+          <% } %>
+          <span class="chip" data-enviar="quiero unos audífonos bluetooth">✍️ Quiero unos audífonos</span>
+          <span class="chip" data-enviar="mi lista">📜 Ver mi lista</span>
+          <span class="chip" data-enviar="¿cuánto es el monto?">💰 ¿Cuánto es el monto?</span>
+          <span class="chip" data-enviar="¿cuándo es el intercambio?">🗓️ ¿Cuándo es?</span>
+          <span class="chip" data-enviar="¿cómo funciona el sorteo?">❓ Cómo funciona</span>
+          <span class="chip" data-enviar="dame ideas para alguien gamer">🎮 Ideas gamer</span>
+          <span class="chip" data-enviar="dame ideas para alguien que le gusta cocinar">🍳 Ideas de cocina</span>
+          <span class="chip" data-enviar="dame ideas para alguien deportista">⚽ Ideas deportivas</span>
+        </div>
+      </div>
+
+      <div class="tarjeta">
+        <h3>📜 Mi lista de deseos</h3>
+        <p class="silencio" style="margin-top:-6px">Se alimenta de lo que me cuentas en el chat. Solo la ve quien te sacó.</p>
+        <ul class="lista-deseos" id="mis-deseos">
+          <% if (misDeseos.length) { misDeseos.forEach(function (d) { %><li><%= d.texto %></li><% }); } else { %>
+            <li>Todavía no has pedido nada</li>
+          <% } %>
+        </ul>
+      </div>
+
+      <% if (tieneAmigo) { %>
+        <div class="tarjeta" style="border-color:var(--oro)">
+          <h3>🤫 Ya tienes amigo secreto</h3>
+          <p class="silencio" style="margin-top:-6px">Pregúntame por él y te muestro sus gustos, tallas y su lista completa de deseos.</p>
+          <a class="btn btn-oro btn-sm" href="/inicio">Ver mi regalo otra vez</a>
+        </div>
+      <% } %>
+    </div>
+
+  </div>
+</main>
+
+<%- include('partials/foot') %>

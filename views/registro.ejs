@@ -1,0 +1,157 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+<% const v = (k) => (datos && datos[k]) ? datos[k] : ''; %>
+
+<main class="contenedor medio">
+  <div class="tarjeta">
+    <div class="centro" style="margin-bottom:8px">
+      <div style="font-size:3.2rem">🧝</div>
+      <h1 style="margin:4px 0">Crear mi usuario</h1>
+      <p class="silencio">
+        Mientras más completo tu perfil, mejor será el regalo que recibas.
+        Los campos con <span class="req">*</span> son obligatorios.
+      </p>
+      <div class="contador-cupo" style="margin-top:14px">
+        <div class="puntos">
+          <% for (let i = 0; i < cupo.max; i++) { %><span class="punto <%= i < cupo.total ? 'on' : '' %>"></span><% } %>
+        </div>
+        <strong><%= cupo.total %>/<%= cupo.max %></strong>
+        <span class="silencio"><%= cupo.completo ? 'cupo completo' : 'faltan ' + cupo.faltan %></span>
+      </div>
+    </div>
+
+    <% if (errores && errores.length) { %>
+      <div class="errores">
+        <strong>Revisa estos puntos:</strong>
+        <ul><% errores.forEach(function (e) { %><li><%= e %></li><% }); %></ul>
+      </div>
+    <% } %>
+
+    <% if (lleno) { %>
+      <div class="errores centro">
+        <strong>🎄 Ya se completaron los <%= cupo.max %> participantes.</strong>
+        <p style="margin:6px 0 0">El sorteo ya fue realizado. Si crees que debes estar en la lista, pide al administrador que te agregue.</p>
+      </div>
+      <div class="centro"><a class="btn btn-ghost" href="/login">Ir a iniciar sesión</a></div>
+    <% } else { %>
+
+    <form method="post" action="/registro" autocomplete="off">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+      <h3 style="margin-top:22px">🔐 Acceso</h3>
+      <div class="grid-form">
+        <div class="campo">
+          <label for="usuario">Usuario <span class="req">*</span></label>
+          <input id="usuario" name="usuario" required value="<%= v('usuario') %>" placeholder="ej. carlos.p" pattern="[a-zA-Z0-9._-]{3,20}">
+          <span class="ayuda">3 a 20 caracteres, sin espacios.</span>
+        </div>
+        <div class="campo">
+          <label for="password">Contraseña <span class="req">*</span></label>
+          <input id="password" name="password" type="password" required minlength="6" placeholder="mínimo 6 caracteres">
+        </div>
+        <div class="campo">
+          <label for="password2">Repetir contraseña <span class="req">*</span></label>
+          <input id="password2" name="password2" type="password" required minlength="6">
+        </div>
+      </div>
+
+      <h3 style="margin-top:26px">🪪 Mis datos</h3>
+      <div class="foto-selector" data-foto style="margin-bottom:16px">
+        <div class="avatar avatar-lg"><%= v('nombre') ? v('nombre').charAt(0).toUpperCase() : '📷' %></div>
+        <div>
+          <label class="btn btn-ghost btn-sm" for="archivo-foto">📷 Elegir mi foto</label>
+          <input id="archivo-foto" type="file" accept="image/*">
+          <input type="hidden" class="foto-datos" name="foto" value="">
+          <div class="ayuda foto-info">Opcional, pero se ve mucho mejor 😉 (se recorta cuadrada)</div>
+        </div>
+      </div>
+
+      <div class="grid-form">
+        <div class="campo">
+          <label for="nombre">Nombre y apellido <span class="req">*</span></label>
+          <input id="nombre" name="nombre" required value="<%= v('nombre') %>" placeholder="Carlos Pérez">
+        </div>
+        <div class="campo">
+          <label for="apodo">Apodo / como te llaman</label>
+          <input id="apodo" name="apodo" value="<%= v('apodo') %>" placeholder="Charly">
+        </div>
+        <div class="campo">
+          <label for="email">Correo electrónico <span class="req">*</span></label>
+          <input id="email" name="email" type="email" required value="<%= v('email') %>" placeholder="tu@correo.com">
+        </div>
+        <div class="campo">
+          <label for="telefono">Teléfono / WhatsApp <span class="req">*</span></label>
+          <input id="telefono" name="telefono" required value="<%= v('telefono') %>" placeholder="999 888 777">
+        </div>
+        <div class="campo">
+          <label for="cumple">Cumpleaños</label>
+          <input id="cumple" name="cumple" type="date" value="<%= v('cumple') %>">
+        </div>
+        <div class="campo">
+          <label for="direccion">Dirección o referencia (para delivery)</label>
+          <input id="direccion" name="direccion" value="<%= v('direccion') %>" placeholder="Opcional">
+        </div>
+      </div>
+
+      <h3 style="margin-top:26px">🎁 Para que acierten con mi regalo</h3>
+      <div class="grid-form">
+        <div class="campo ancho">
+          <label for="gustos">¿Qué te gusta? <span class="req">*</span></label>
+          <textarea id="gustos" name="gustos" required placeholder="Ej: la tecnología, el café, leer novelas, los perros…"><%= v('gustos') %></textarea>
+        </div>
+        <div class="campo ancho">
+          <label for="hobbies">Hobbies / qué haces en tu tiempo libre <span class="req">*</span></label>
+          <textarea id="hobbies" name="hobbies" required placeholder="Ej: juego fútbol los domingos, cocino postres, videojuegos…"><%= v('hobbies') %></textarea>
+        </div>
+        <div class="campo ancho">
+          <label for="no_gustos">¿Qué NO te gusta? (alergias, cosas que ya tienes)</label>
+          <textarea id="no_gustos" name="no_gustos" placeholder="Ej: soy alérgico al maní, no tomo alcohol…"><%= v('no_gustos') %></textarea>
+        </div>
+        <div class="campo">
+          <label for="talla_ropa">Talla de ropa <span class="req">*</span></label>
+          <select id="talla_ropa" name="talla_ropa" required>
+            <option value="">Elegir…</option>
+            <% ['XS','S','M','L','XL','XXL','XXXL'].forEach(function (t) { %>
+              <option value="<%= t %>" <%= v('talla_ropa') === t ? 'selected' : '' %>><%= t %></option>
+            <% }); %>
+          </select>
+        </div>
+        <div class="campo">
+          <label for="talla_zapato">Talla de zapato <span class="req">*</span></label>
+          <input id="talla_zapato" name="talla_zapato" required value="<%= v('talla_zapato') %>" placeholder="Ej: 40">
+        </div>
+        <div class="campo">
+          <label for="color_favorito">Color favorito <span class="req">*</span></label>
+          <input id="color_favorito" name="color_favorito" required value="<%= v('color_favorito') %>" placeholder="Ej: azul">
+        </div>
+      </div>
+
+      <h3 style="margin-top:26px">⭐ Mis 3 deseos</h3>
+      <p class="ayuda" style="margin-top:-6px">Solo quien te saque en el sorteo podrá verlos. El duende también los usará para dar ideas.</p>
+      <div class="grid-form">
+        <div class="campo ancho">
+          <label for="deseo1">Deseo principal <span class="req">*</span></label>
+          <input id="deseo1" name="deseo1" required value="<%= v('deseo1') %>" placeholder="Ej: unos audífonos bluetooth">
+        </div>
+        <div class="campo">
+          <label for="deseo2">Segundo deseo</label>
+          <input id="deseo2" name="deseo2" value="<%= v('deseo2') %>" placeholder="Ej: una taza térmica">
+        </div>
+        <div class="campo">
+          <label for="deseo3">Tercer deseo</label>
+          <input id="deseo3" name="deseo3" value="<%= v('deseo3') %>" placeholder="Ej: un libro de misterio">
+        </div>
+      </div>
+
+      <button class="btn btn-verde" style="width:100%;margin-top:26px" type="submit">
+        🎄 Registrarme en el intercambio
+      </button>
+      <p class="centro silencio" style="margin-top:14px">
+        Al registrarte, si eres el participante número <%= cupo.max %>, ¡el sorteo se hará al instante!
+      </p>
+    </form>
+    <% } %>
+  </div>
+</main>
+
+<%- include('partials/foot') %>

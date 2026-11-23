@@ -1,0 +1,63 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<section class="hero">
+  <span class="cinta">❄️ <%= cfg.fecha_evento %> · <%= cfg.lugar %></span>
+  <h1><span class="dorado">Amigo Secreto</span><br>entre los mejores amigos 🎁</h1>
+  <p class="lead">
+    Crea tu usuario, cuenta qué te gusta y espera la magia: cuando se completen los
+    <strong><%= cupo.max %> participantes</strong>, el sistema hace el sorteo
+    <strong>automático y al azar</strong>. Nadie —ni el administrador— puede cambiarte tu suerte.
+  </p>
+
+  <div class="acciones">
+    <a class="btn" href="/registro">🎄 Crear mi usuario</a>
+    <a class="btn btn-ghost" href="/login">Ya tengo cuenta</a>
+  </div>
+
+  <div class="contador-cupo">
+    <div class="puntos">
+      <% for (let i = 0; i < cupo.max; i++) { %>
+        <span class="punto <%= i < cupo.total ? 'on' : '' %>"></span>
+      <% } %>
+    </div>
+    <strong><%= cupo.total %>/<%= cupo.max %></strong>
+    <span class="silencio">
+      <% if (sorteoHecho) { %>¡Sorteo realizado! 🎲<% } else if (cupo.completo) { %>Cupo completo<% } else { %>faltan <%= cupo.faltan %><% } %>
+    </span>
+  </div>
+</section>
+
+<main class="contenedor medio">
+  <div class="tarjeta">
+    <h2>¿Cómo funciona? 🎅</h2>
+    <ol class="pasos">
+      <li><b>Regístrate</b> con tus datos completos: foto, gustos, hobbies, tallas y tus 3 deseos. Todos los campos marcados son obligatorios para que tu amigo acierte con el regalo.</li>
+      <li><b>Espera a los <%= cupo.max %></b>. En cuanto el último amigo se registre, el sorteo se ejecuta solo, con un algoritmo aleatorio seguro: nadie se saca a sí mismo. Al entrar, la app te avisa al instante quién te tocó.</li>
+      <li><b>Abre tu regalo</b> al entrar y descubre quién es tu amigo secreto. Solo tú ves tu resultado.</li>
+      <li><b>Pide ideas al duende 🧝</b>, un asistente que te sugiere regalos según los gustos de tu amigo y guarda lo que tú quieres recibir.</li>
+      <li><b>Mira el perfil de todos</b> los amigos del grupo… pero nunca a quién le tocó cada uno. Ese es el secreto 🤫</li>
+    </ol>
+  </div>
+
+  <% if (participantes.length) { %>
+  <div class="tarjeta">
+    <h2>Ya están dentro 👥</h2>
+    <p class="silencio">Los perfiles completos se ven al iniciar sesión.</p>
+    <div class="rejilla" style="margin-top:16px">
+      <% participantes.forEach(function (u) { %>
+        <div class="amigo">
+          <%- include('partials/avatar', { u: u, tam: 'lg' }) %>
+          <div class="nombre"><%= u.nombre %></div>
+          <% if (u.apodo) { %><div class="alias">"<%= u.apodo %>"</div><% } %>
+        </div>
+      <% }); %>
+      <% for (let i = 0; i < cupo.faltan; i++) { %>
+        <div class="vacante"><span>➕</span>Lugar disponible</div>
+      <% } %>
+    </div>
+  </div>
+  <% } %>
+</main>
+
+<%- include('partials/foot') %>

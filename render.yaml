@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: amigo-secreto-navidad
+    runtime: node
+    plan: starter          # necesario para disco persistente (SQLite).
+    region: oregon
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /salud
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_SECRET
+        generateValue: true   # Render genera un secreto seguro automáticamente
+      - key: DB_DIR
+        value: /var/data      # carpeta del disco persistente
+    disk:
+      name: datos-amigo-secreto
+      mountPath: /var/data
+      sizeGB: 1
