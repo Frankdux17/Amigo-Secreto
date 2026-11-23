@@ -44,8 +44,20 @@
         <b>Duende Ayudante</b>
         <div class="estado-on">en línea · experto en regalos</div>
       </div>
+      <button class="duende-ajustes" id="voz-ajustes" type="button" title="Ajustar la voz" aria-label="Ajustar la voz">⚙</button>
       <button class="duende-cerrar" id="duende-cerrar" aria-label="Cerrar">×</button>
     </header>
+
+    <div class="voz-barra" id="voz-barra">
+      <label for="voz-select">Voz del duende</label>
+      <select id="voz-select" aria-label="Elegir voz"></select>
+      <div class="voz-tonos" role="group" aria-label="Tono de la voz">
+        <button type="button" data-tono="duende">Duende</button>
+        <button type="button" data-tono="nino">Niño</button>
+        <button type="button" data-tono="normal">Normal</button>
+      </div>
+      <span class="voz-nota">Se escucha al elegir. Tu preferencia queda guardada.</span>
+    </div>
 
     <div class="duende-msjs" id="duende-msjs"></div>
 

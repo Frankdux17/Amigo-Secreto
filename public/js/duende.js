@@ -29,30 +29,74 @@
   let saludado = false;
   let rotador = null;
 
+  const escapar = (s) => String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  const nombreCorto = (u) => u ? (u.apodo || String(u.nombre).split(' ')[0]) : '';
+
   // ==========================================================
   //  VOZ DEL DUENDECITO (Web Speech API, sin dependencias)
-  //  Tono agudo y ritmo vivo para que suene a duende chiquito.
+  //
+  //  Las voces disponibles cambian de un equipo a otro, así que:
+  //   - se prefiere la de mejor calidad que haya (las de Google suenan
+  //     mucho mejor que las "Desktop" de Windows),
+  //   - y el usuario puede elegir otra y probarla en vivo.
+  //  Un tono demasiado agudo distorsiona, por eso el preset "duende"
+  //  se queda en 1.45 en vez de forzar el máximo.
   // ==========================================================
   const VOZ_KEY = 'duende-voz';
+  const VOZ_NOMBRE_KEY = 'duende-voz-nombre';
+  const VOZ_TONO_KEY = 'duende-voz-tono';
+
+  const TONOS = {
+    duende: { pitch: 1.45, rate: 1.06, etiqueta: 'Duende' },
+    nino:   { pitch: 1.65, rate: 0.98, etiqueta: 'Niño' },
+    normal: { pitch: 1.10, rate: 1.00, etiqueta: 'Normal' }
+  };
+
   const sintesis = window.speechSynthesis || null;
   let vozActiva = true;
   let vozElegida = null;
+  let tonoActual = 'duende';
   let desbloqueada = false;   // los navegadores exigen un gesto del usuario
   let pendiente = null;
 
-  try { vozActiva = localStorage.getItem(VOZ_KEY) !== '0'; } catch (e) { /* modo incógnito */ }
+  const leerPref = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } };
+  const guardarPref = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* incógnito */ } };
+
+  vozActiva = leerPref(VOZ_KEY, '1') !== '0';
+  tonoActual = TONOS[leerPref(VOZ_TONO_KEY, 'duende')] ? leerPref(VOZ_TONO_KEY, 'duende') : 'duende';
+
+  function vocesDisponibles() {
+    if (!sintesis) return [];
+    const todas = sintesis.getVoices() || [];
+    const es = todas.filter(v => /^es/i.test(v.lang));
+    return es.length ? es : todas;
+  }
+
+  // puntaje: cuanto más alto, mejor suena para un duende en español
+  function puntuar(v) {
+    let p = 0;
+    const n = (v.name || '').toLowerCase();
+    if (/google/.test(n)) p += 100;                      // claramente las mejores
+    if (/natural|neural|online|premium/.test(n)) p += 80;
+    if (/sabina|paulina|helena|laura|elena|lucia|mónica|monica/.test(n)) p += 30; // femeninas
+    if (/es-(mx|us|pe|co|ar|cl)/i.test(v.lang)) p += 20;  // español latino
+    if (/^es/i.test(v.lang)) p += 10;
+    if (/desktop/.test(n)) p -= 25;                      // las viejas de Windows suenan metálicas
+    return p;
+  }
 
   function elegirVoz() {
     if (!sintesis) return;
-    const voces = sintesis.getVoices() || [];
-    const es = voces.filter(v => /^es/i.test(v.lang));
-    // preferimos español latino y voces femeninas: suenan más a duendecito
-    vozElegida =
-      es.find(v => /mx|pe|co|ar|cl|us/i.test(v.lang) && /female|mujer|sabina|paulina|helena/i.test(v.name)) ||
-      es.find(v => /mx|pe|co|ar|cl|us/i.test(v.lang)) ||
-      es.find(v => /female|mujer|helena|laura|monica/i.test(v.name)) ||
-      es[0] || null;
+    const lista = vocesDisponibles();
+    if (!lista.length) return;
+    const guardada = leerPref(VOZ_NOMBRE_KEY, '');
+    const match = guardada && lista.find(v => v.name === guardada);
+    vozElegida = match || lista.slice().sort((a, b) => puntuar(b) - puntuar(a))[0] || null;
+    pintarSelector(lista);
   }
+
   if (sintesis) {
     elegirVoz();
     sintesis.addEventListener('voiceschanged', elegirVoz);
@@ -65,6 +109,8 @@
       .replace(/<[^>]*>/g, ' ')
       .replace(/[\u{1F000}-\u{1FAFF}\u{2190}-\u{27BF}\u{FE0F}\u{2B00}-\u{2BFF}]/gu, '')
       .replace(/[*_`#•·→➜]/g, ' ')
+      .replace(/\s*\n\s*/g, '. ')
+      .replace(/\.\s*\./g, '.')
       .replace(/\s+/g, ' ')
       .trim();
   }
@@ -81,12 +127,13 @@
     if (!desbloqueada) { pendiente = t; return; }
     try {
       sintesis.cancel();
+      const cfg = TONOS[tonoActual] || TONOS.duende;
       const u = new SpeechSynthesisUtterance(t);
-      if (vozElegida) u.voice = vozElegida;
-      u.lang = (vozElegida && vozElegida.lang) || 'es-ES';
-      u.pitch = 1.9;   // agudo = duendecito
-      u.rate = 1.08;   // un poquito acelerado, travieso
-      u.volume = 0.95;
+      if (vozElegida) { u.voice = vozElegida; u.lang = vozElegida.lang; }
+      else u.lang = 'es-ES';
+      u.pitch = cfg.pitch;
+      u.rate = cfg.rate;
+      u.volume = 1;
       u.onstart = () => widget.classList.add('hablando');
       u.onend = u.onerror = () => widget.classList.remove('hablando');
       sintesis.speak(u);
@@ -101,6 +148,58 @@
   }
   ['pointerdown', 'keydown', 'touchstart'].forEach(ev =>
     document.addEventListener(ev, desbloquear, { once: true, passive: true }));
+
+  // ---------------------------------------- controles de voz
+  const selVoz = $('#voz-select');
+  const barraVoz = $('#voz-barra');
+
+  function pintarSelector(lista) {
+    if (!selVoz) return;
+    const actual = vozElegida ? vozElegida.name : '';
+    if (selVoz.dataset.n === String((lista || []).length) && selVoz.value === actual) return;
+    selVoz.innerHTML = '';
+    (lista || vocesDisponibles()).forEach(v => {
+      const o = document.createElement('option');
+      o.value = v.name;
+      o.textContent = v.name.replace(/microsoft |desktop|online \(natural\) ?/gi, '').trim() + ' · ' + v.lang;
+      if (vozElegida && v.name === vozElegida.name) o.selected = true;
+      selVoz.appendChild(o);
+    });
+    selVoz.dataset.n = String((lista || vocesDisponibles()).length);
+  }
+
+  function pintarTonos() {
+    document.querySelectorAll('[data-tono]').forEach(b =>
+      b.classList.toggle('activo', b.dataset.tono === tonoActual));
+  }
+
+  if (selVoz) {
+    selVoz.addEventListener('change', () => {
+      const lista = vocesDisponibles();
+      vozElegida = lista.find(v => v.name === selVoz.value) || vozElegida;
+      guardarPref(VOZ_NOMBRE_KEY, selVoz.value);
+      desbloquear();
+      hablar('Hola, soy el duendecito. ¿Te gusta más así?');
+    });
+  }
+
+  document.querySelectorAll('[data-tono]').forEach(b => {
+    b.addEventListener('click', () => {
+      tonoActual = b.dataset.tono;
+      guardarPref(VOZ_TONO_KEY, tonoActual);
+      pintarTonos();
+      desbloquear();
+      hablar('Así sueno con el tono ' + (TONOS[tonoActual] || {}).etiqueta + '.');
+    });
+  });
+
+  const btnAjustes = $('#voz-ajustes');
+  if (btnAjustes && barraVoz) {
+    btnAjustes.addEventListener('click', () => {
+      barraVoz.classList.toggle('abierta');
+      if (barraVoz.classList.contains('abierta')) { elegirVoz(); pintarTonos(); }
+    });
+  }
 
   function pintarBotonVoz() {
     const b = $('#duende-voz');
@@ -118,17 +217,13 @@
     btnVoz.addEventListener('click', (e) => {
       e.stopPropagation();
       vozActiva = !vozActiva;
-      try { localStorage.setItem(VOZ_KEY, vozActiva ? '1' : '0'); } catch (err) { /* nada */ }
+      guardarPref(VOZ_KEY, vozActiva ? '1' : '0');
       pintarBotonVoz();
       if (vozActiva) { desbloquear(); hablar('¡Hola! Ya puedes oírme otra vez.'); }
       else if (sintesis) { sintesis.cancel(); widget.classList.remove('hablando'); }
     });
   }
-
-  const escapar = (s) => String(s).replace(/[&<>"']/g, c =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-
-  const nombreCorto = (u) => u ? (u.apodo || String(u.nombre).split(' ')[0]) : '';
+  pintarTonos();
 
   // -------------------------------------------------- globo de avisos
   let globoTimer = null;
