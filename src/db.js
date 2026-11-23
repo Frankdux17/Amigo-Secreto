@@ -122,7 +122,7 @@ function seedAdmin() {
     VALUES (@usuario, @password_hash, @nombre, @apodo, @email, @telefono, @gustos, @no_gustos,
      @talla_ropa, @talla_zapato, @color_favorito, @hobbies, @deseo1, 'admin')`).run({
     usuario: 'admin',
-    password_hash: bcrypt.hashSync('admin123', 10),
+    password_hash: bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'admin123', 10),
     nombre: 'Administrador',
     apodo: 'Santa Jefe',
     email: 'admin@navidad.local',

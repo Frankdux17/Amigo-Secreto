@@ -3,6 +3,20 @@
 <% const participantes = usuarios.filter(function (u) { return u.rol === 'participante'; }); %>
 
 <main class="contenedor">
+  <% if (claveInsegura) { %>
+    <div class="errores" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:1.8rem">🔓</span>
+      <div style="flex:1;min-width:240px">
+        <strong>Estás usando la contraseña por defecto (<code>admin123</code>).</strong>
+        <p style="margin:4px 0 0;color:#ffd4d8">
+          Si vas a compartir el enlace con tus amigos, cámbiala ahora: cualquiera que conozca
+          la clave por defecto podría ver todas las parejas del sorteo.
+        </p>
+      </div>
+      <a class="btn btn-sm" href="/perfil">Cambiar mi contraseña</a>
+    </div>
+  <% } %>
+
   <div class="tarjeta">
     <h1>⚙️ Panel de administración</h1>
     <p class="silencio" style="margin-top:-6px">

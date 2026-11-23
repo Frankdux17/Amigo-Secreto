@@ -440,11 +440,14 @@ app.post('/api/bot', pedirLogin, (req, res) => {
 //  Administración
 // ------------------------------------------------------------
 app.get('/admin', pedirLogin, pedirAdmin, (req, res) => {
+  const yo = usuarioActual(req);
   res.render('admin', {
     titulo: 'Panel de administración',
     usuarios: Q.todos.all(),
     parejas: sorteo.todasLasAsignaciones(),
-    dbFile: DB_FILE
+    dbFile: DB_FILE,
+    // aviso si el admin sigue con la contraseña por defecto
+    claveInsegura: bcrypt.compareSync('admin123', yo.password_hash)
   });
 });
 
