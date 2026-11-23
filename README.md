@@ -56,6 +56,10 @@ Un personaje animado en SVG (camina, saluda, parpadea, le suena el pompón) acom
 - **Da ideas de regalo** según el perfil del amigo, y **aprende** lo que el usuario quiere recibir
   («quiero una manta polar» → queda en su lista, visible solo para quien lo sacó).
 - Antes del sorteo recuerda cuántos amigos faltan y anima a completar el perfil.
+- **Habla.** Tiene voz de duendecito (aguda y rápida) con la síntesis de voz del propio
+  navegador: narra el resultado del sorteo, sus avisos y sus respuestas del chat. No usa ningún
+  servicio externo ni archivos de audio. Se puede silenciar con el botón 🔊 junto al personaje y
+  la preferencia queda guardada en ese navegador.
 
 ### Otros detalles navideños
 - Nieve animada, guirnalda de luces y confeti.

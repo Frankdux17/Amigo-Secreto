@@ -1,0 +1,46 @@
+/* ==========================================================
+   VOZ DEL DUENDECITO — botón de silencio y ondas al hablar
+   ========================================================== */
+.duende-voz {
+  position: absolute; top: -6px; left: -10px; z-index: 2;
+  width: 32px; height: 32px; border-radius: 50%; cursor: pointer; padding: 0;
+  font-size: .9rem; line-height: 1;
+  background: rgba(10, 18, 42, .92); border: 1px solid var(--oro);
+  color: #fff; box-shadow: 0 6px 16px rgba(0, 0, 0, .45);
+  transition: transform .18s, background .18s, border-color .18s;
+}
+.duende-voz:hover { transform: scale(1.14); background: var(--verde); border-color: var(--verde-2); }
+.duende-voz.mudo { border-color: var(--borde); opacity: .72; }
+
+/* ondas de sonido que salen del duende mientras habla */
+/* se dibujan hacia la izquierda (hacia el contenido) para no salirse de la pantalla */
+.duende-ondas {
+  position: absolute; left: 8px; top: 16px; width: 0; height: 0;
+  transform: scaleX(-1);
+  pointer-events: none; opacity: 0; transition: opacity .25s;
+}
+.duende-widget.hablando .duende-ondas { opacity: 1; }
+.duende-ondas i {
+  position: absolute; left: 24px; top: 0;
+  width: 9px; height: 9px; border: 2px solid var(--oro-2); border-left: 0; border-bottom: 0;
+  border-radius: 0 7px 0 0; transform: rotate(45deg);
+  animation: onda 1.1s ease-out infinite;
+}
+.duende-ondas i:nth-child(2) { left: 31px; top: -4px; width: 14px; height: 14px; animation-delay: .18s; }
+.duende-ondas i:nth-child(3) { left: 38px; top: -8px; width: 19px; height: 19px; animation-delay: .36s; }
+@keyframes onda {
+  0%   { opacity: 0; transform: rotate(45deg) scale(.6); }
+  45%  { opacity: 1; }
+  100% { opacity: 0; transform: rotate(45deg) scale(1.15); }
+}
+
+/* el duendecito se mueve un poco más rápido mientras habla */
+.duende-widget.hablando .d-cuerpo { animation-duration: 1.1s; }
+.duende-widget.hablando .d-cabeza { animation-duration: 2.2s; }
+
+@media (max-width: 560px) {
+  .duende-voz { width: 28px; height: 28px; font-size: .8rem; top: -4px; left: -6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .duende-ondas i { animation: none !important; }
+}

@@ -29,6 +29,102 @@
   let saludado = false;
   let rotador = null;
 
+  // ==========================================================
+  //  VOZ DEL DUENDECITO (Web Speech API, sin dependencias)
+  //  Tono agudo y ritmo vivo para que suene a duende chiquito.
+  // ==========================================================
+  const VOZ_KEY = 'duende-voz';
+  const sintesis = window.speechSynthesis || null;
+  let vozActiva = true;
+  let vozElegida = null;
+  let desbloqueada = false;   // los navegadores exigen un gesto del usuario
+  let pendiente = null;
+
+  try { vozActiva = localStorage.getItem(VOZ_KEY) !== '0'; } catch (e) { /* modo incógnito */ }
+
+  function elegirVoz() {
+    if (!sintesis) return;
+    const voces = sintesis.getVoices() || [];
+    const es = voces.filter(v => /^es/i.test(v.lang));
+    // preferimos español latino y voces femeninas: suenan más a duendecito
+    vozElegida =
+      es.find(v => /mx|pe|co|ar|cl|us/i.test(v.lang) && /female|mujer|sabina|paulina|helena/i.test(v.name)) ||
+      es.find(v => /mx|pe|co|ar|cl|us/i.test(v.lang)) ||
+      es.find(v => /female|mujer|helena|laura|monica/i.test(v.name)) ||
+      es[0] || null;
+  }
+  if (sintesis) {
+    elegirVoz();
+    sintesis.addEventListener('voiceschanged', elegirVoz);
+  }
+
+  // quita etiquetas, emojis y viñetas: solo se lee el texto
+  function limpiarParaVoz(t) {
+    return String(t)
+      .replace(/<br\s*\/?>/gi, '. ')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/[\u{1F000}-\u{1FAFF}\u{2190}-\u{27BF}\u{FE0F}\u{2B00}-\u{2BFF}]/gu, '')
+      .replace(/[*_`#•·→➜]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function hablar(texto, maximo) {
+    if (!sintesis || !vozActiva) return;
+    let t = limpiarParaVoz(texto);
+    if (!t) return;
+    const tope = maximo || 230;
+    if (t.length > tope) {
+      const corte = t.lastIndexOf('.', tope);
+      t = t.slice(0, corte > 60 ? corte + 1 : tope);
+    }
+    if (!desbloqueada) { pendiente = t; return; }
+    try {
+      sintesis.cancel();
+      const u = new SpeechSynthesisUtterance(t);
+      if (vozElegida) u.voice = vozElegida;
+      u.lang = (vozElegida && vozElegida.lang) || 'es-ES';
+      u.pitch = 1.9;   // agudo = duendecito
+      u.rate = 1.08;   // un poquito acelerado, travieso
+      u.volume = 0.95;
+      u.onstart = () => widget.classList.add('hablando');
+      u.onend = u.onerror = () => widget.classList.remove('hablando');
+      sintesis.speak(u);
+    } catch (e) { /* si el navegador no deja, no pasa nada */ }
+  }
+
+  // el primer clic/tecla del usuario habilita el audio
+  function desbloquear() {
+    if (desbloqueada) return;
+    desbloqueada = true;
+    if (pendiente) { const t = pendiente; pendiente = null; hablar(t); }
+  }
+  ['pointerdown', 'keydown', 'touchstart'].forEach(ev =>
+    document.addEventListener(ev, desbloquear, { once: true, passive: true }));
+
+  function pintarBotonVoz() {
+    const b = $('#duende-voz');
+    if (!b) return;
+    b.textContent = vozActiva ? '🔊' : '🔇';
+    b.title = vozActiva ? 'Silenciar al duende' : 'Activar la voz del duende';
+    b.setAttribute('aria-label', b.title);
+    b.classList.toggle('mudo', !vozActiva);
+  }
+
+  const btnVoz = $('#duende-voz');
+  if (btnVoz) {
+    if (!sintesis) btnVoz.style.display = 'none';
+    pintarBotonVoz();
+    btnVoz.addEventListener('click', (e) => {
+      e.stopPropagation();
+      vozActiva = !vozActiva;
+      try { localStorage.setItem(VOZ_KEY, vozActiva ? '1' : '0'); } catch (err) { /* nada */ }
+      pintarBotonVoz();
+      if (vozActiva) { desbloquear(); hablar('¡Hola! Ya puedes oírme otra vez.'); }
+      else if (sintesis) { sintesis.cancel(); widget.classList.remove('hablando'); }
+    });
+  }
+
   const escapar = (s) => String(s).replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -42,6 +138,7 @@
     globo.classList.add('ver');
     clearTimeout(globoTimer);
     globoTimer = setTimeout(() => globo.classList.remove('ver'), ms || 9000);
+    hablar(html, 150);
   }
   $('#duende-globo-x').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -104,6 +201,7 @@
     const d = document.createElement('div');
     d.className = 'msj ' + rol;
     if (esHtml) d.innerHTML = texto; else d.textContent = texto;
+    if (rol.indexOf('bot') === 0 && rol.indexOf('escribiendo') < 0) hablar(texto);
     msjs.appendChild(d);
     msjs.scrollTop = msjs.scrollHeight;
     return d;
@@ -217,6 +315,7 @@
 
     $('#sorpresa-perfil').href = '/participante/' + amigo.id;
     sorpresa.classList.add('ver');
+    hablar('¡Ya salió el sorteo! Tu amigo secreto es ' + amigo.nombre + '. ' + (amigo.gustos ? 'Le gusta ' + amigo.gustos + '.' : ''), 200);
     if (window.confetiNavidad) window.confetiNavidad(190);
 
     // marca como visto en el servidor
