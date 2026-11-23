@@ -7,6 +7,9 @@ services:
     buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /salud
+    # Cada push a main redespliega solo. Los datos no se tocan: viven en Turso.
+    autoDeploy: true
+    branch: main
     envVars:
       - key: NODE_ENV
         value: production
