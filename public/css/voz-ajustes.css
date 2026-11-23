@@ -41,3 +41,18 @@
 }
 
 .voz-nota { font-size: .72rem; color: #8e9bbd; line-height: 1.4; }
+
+.voz-probar {
+  padding: 10px 14px; border-radius: 11px; cursor: pointer; font: inherit;
+  font-size: .85rem; font-weight: 700; color: #fff; border: 0;
+  background: linear-gradient(135deg, var(--oro-2), #d99d1c); color: #3a2800;
+  box-shadow: 0 6px 16px rgba(244, 196, 75, .3);
+  transition: transform .15s, box-shadow .15s;
+}
+.voz-probar:hover { transform: translateY(-1px); box-shadow: 0 9px 22px rgba(244, 196, 75, .45); }
+.voz-probar:active { transform: none; }
+
+.voz-estado {
+  font-size: .72rem; color: var(--verde-2); font-weight: 600; line-height: 1.4;
+}
+.voz-estado.malo { color: #ffb4bc; }

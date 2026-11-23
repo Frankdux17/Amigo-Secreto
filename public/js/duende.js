@@ -37,12 +37,16 @@
   // ==========================================================
   //  VOZ DEL DUENDECITO (Web Speech API, sin dependencias)
   //
-  //  Las voces disponibles cambian de un equipo a otro, así que:
-  //   - se prefiere la de mejor calidad que haya (las de Google suenan
-  //     mucho mejor que las "Desktop" de Windows),
-  //   - y el usuario puede elegir otra y probarla en vivo.
-  //  Un tono demasiado agudo distorsiona, por eso el preset "duende"
-  //  se queda en 1.45 en vez de forzar el máximo.
+  //  Dos cosas que hacen fallar a la sintesis de voz en Chrome y que
+  //  aqui estan resueltas:
+  //   1. llamar a cancel() y a speak() seguidos deja la frase muda, asi
+  //      que se usa una cola: se habla de una en una y solo se cancela
+  //      cuando el usuario silencia o cambia de voz;
+  //   2. el navegador no deja sonar nada hasta que el usuario interactua,
+  //      asi que la primera frase queda pendiente y suena con el primer clic.
+  //
+  //  Las voces instaladas cambian de un equipo a otro: se elige la de mejor
+  //  calidad disponible y el usuario puede probar otras desde el engranaje.
   // ==========================================================
   const VOZ_KEY = 'duende-voz';
   const VOZ_NOMBRE_KEY = 'duende-voz-nombre';
@@ -58,11 +62,21 @@
   let vozActiva = true;
   let vozElegida = null;
   let tonoActual = 'duende';
-  let desbloqueada = false;   // los navegadores exigen un gesto del usuario
+  let desbloqueada = false;
   let pendiente = null;
+
+  // cola de frases: evita el bug de cancel()+speak()
+  let cola = [];
+  let hablando = false;
+  let guardaTiempo = null;
 
   const leerPref = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } };
   const guardarPref = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* incógnito */ } };
+
+  // se declaran aquí porque elegirVoz() los usa apenas arranca el script
+  const selVoz = $('#voz-select');
+  const barraVoz = $('#voz-barra');
+  const estadoVoz = $('#voz-estado');
 
   vozActiva = leerPref(VOZ_KEY, '1') !== '0';
   tonoActual = TONOS[leerPref(VOZ_TONO_KEY, 'duende')] ? leerPref(VOZ_TONO_KEY, 'duende') : 'duende';
@@ -80,7 +94,7 @@
     const n = (v.name || '').toLowerCase();
     if (/google/.test(n)) p += 100;                      // claramente las mejores
     if (/natural|neural|online|premium/.test(n)) p += 80;
-    if (/sabina|paulina|helena|laura|elena|lucia|mónica|monica/.test(n)) p += 30; // femeninas
+    if (/sabina|paulina|helena|laura|elena|lucia|mónica|monica/.test(n)) p += 30;
     if (/es-(mx|us|pe|co|ar|cl)/i.test(v.lang)) p += 20;  // español latino
     if (/^es/i.test(v.lang)) p += 10;
     if (/desktop/.test(n)) p -= 25;                      // las viejas de Windows suenan metálicas
@@ -90,11 +104,12 @@
   function elegirVoz() {
     if (!sintesis) return;
     const lista = vocesDisponibles();
-    if (!lista.length) return;
+    if (!lista.length) { pintarEstadoVoz(0); return; }
     const guardada = leerPref(VOZ_NOMBRE_KEY, '');
     const match = guardada && lista.find(v => v.name === guardada);
     vozElegida = match || lista.slice().sort((a, b) => puntuar(b) - puntuar(a))[0] || null;
     pintarSelector(lista);
+    pintarEstadoVoz(lista.length);
   }
 
   if (sintesis) {
@@ -119,25 +134,52 @@
     if (!sintesis || !vozActiva) return;
     let t = limpiarParaVoz(texto);
     if (!t) return;
-    const tope = maximo || 230;
+    // Chrome corta las frases largas alrededor de los 15 s
+    const tope = maximo || 180;
     if (t.length > tope) {
       const corte = t.lastIndexOf('.', tope);
       t = t.slice(0, corte > 60 ? corte + 1 : tope);
     }
     if (!desbloqueada) { pendiente = t; return; }
-    try {
-      sintesis.cancel();
-      const cfg = TONOS[tonoActual] || TONOS.duende;
-      const u = new SpeechSynthesisUtterance(t);
-      if (vozElegida) { u.voice = vozElegida; u.lang = vozElegida.lang; }
-      else u.lang = 'es-ES';
-      u.pitch = cfg.pitch;
-      u.rate = cfg.rate;
-      u.volume = 1;
-      u.onstart = () => widget.classList.add('hablando');
-      u.onend = u.onerror = () => widget.classList.remove('hablando');
-      sintesis.speak(u);
-    } catch (e) { /* si el navegador no deja, no pasa nada */ }
+    cola = cola.slice(-1);   // como mucho una frase esperando
+    cola.push(t);
+    procesarCola();
+  }
+
+  function procesarCola() {
+    if (!sintesis || hablando || !cola.length) return;
+    const t = cola.shift();
+    const cfg = TONOS[tonoActual] || TONOS.duende;
+    let u;
+    try { u = new SpeechSynthesisUtterance(t); } catch (e) { return; }
+    if (vozElegida) { u.voice = vozElegida; u.lang = vozElegida.lang; }
+    else u.lang = 'es-ES';
+    u.pitch = cfg.pitch;
+    u.rate = cfg.rate;
+    u.volume = 1;
+
+    const terminar = () => {
+      clearTimeout(guardaTiempo);
+      hablando = false;
+      widget.classList.remove('hablando');
+      setTimeout(procesarCola, 140);
+    };
+    u.onstart = () => widget.classList.add('hablando');
+    u.onend = terminar;
+    u.onerror = terminar;
+
+    hablando = true;
+    try { sintesis.speak(u); } catch (e) { terminar(); return; }
+    // por si onend nunca llega (pasa en algunos navegadores)
+    guardaTiempo = setTimeout(terminar, Math.max(6000, t.length * 110));
+  }
+
+  function callar() {
+    cola = [];
+    hablando = false;
+    clearTimeout(guardaTiempo);
+    try { if (sintesis) sintesis.cancel(); } catch (e) { /* nada */ }
+    widget.classList.remove('hablando');
   }
 
   // el primer clic/tecla del usuario habilita el audio
@@ -150,8 +192,21 @@
     document.addEventListener(ev, desbloquear, { once: true, passive: true }));
 
   // ---------------------------------------- controles de voz
-  const selVoz = $('#voz-select');
-  const barraVoz = $('#voz-barra');
+
+  function pintarEstadoVoz(n) {
+    if (!estadoVoz) return;
+    if (!sintesis) {
+      estadoVoz.textContent = 'Este navegador no puede hablar. Prueba con Chrome o Edge.';
+      estadoVoz.className = 'voz-estado malo';
+    } else if (!n) {
+      estadoVoz.textContent = 'No se detectaron voces instaladas en este equipo.';
+      estadoVoz.className = 'voz-estado malo';
+    } else {
+      estadoVoz.textContent = n + (n === 1 ? ' voz detectada' : ' voces detectadas') +
+        (vozElegida ? ' · usando: ' + vozElegida.name.replace(/microsoft |desktop/gi, '').trim() : '');
+      estadoVoz.className = 'voz-estado';
+    }
+  }
 
   function pintarSelector(lista) {
     if (!selVoz) return;
@@ -173,13 +228,24 @@
       b.classList.toggle('activo', b.dataset.tono === tonoActual));
   }
 
+  function probarVoz(frase) {
+    if (!vozActiva) {
+      vozActiva = true;
+      guardarPref(VOZ_KEY, '1');
+      pintarBotonVoz();
+    }
+    desbloquear();
+    callar();
+    hablar(frase || '¡Hola! Soy el duendecito de la Navidad. ¿Me escuchas bien?');
+  }
+
   if (selVoz) {
     selVoz.addEventListener('change', () => {
       const lista = vocesDisponibles();
       vozElegida = lista.find(v => v.name === selVoz.value) || vozElegida;
       guardarPref(VOZ_NOMBRE_KEY, selVoz.value);
-      desbloquear();
-      hablar('Hola, soy el duendecito. ¿Te gusta más así?');
+      pintarEstadoVoz(lista.length);
+      probarVoz('Hola, soy el duendecito. ¿Te gusta más así?');
     });
   }
 
@@ -188,10 +254,12 @@
       tonoActual = b.dataset.tono;
       guardarPref(VOZ_TONO_KEY, tonoActual);
       pintarTonos();
-      desbloquear();
-      hablar('Así sueno con el tono ' + (TONOS[tonoActual] || {}).etiqueta + '.');
+      probarVoz('Así sueno con el tono ' + (TONOS[tonoActual] || {}).etiqueta + '.');
     });
   });
+
+  const btnProbar = $('#voz-probar');
+  if (btnProbar) btnProbar.addEventListener('click', () => probarVoz());
 
   const btnAjustes = $('#voz-ajustes');
   if (btnAjustes && barraVoz) {
@@ -220,10 +288,11 @@
       guardarPref(VOZ_KEY, vozActiva ? '1' : '0');
       pintarBotonVoz();
       if (vozActiva) { desbloquear(); hablar('¡Hola! Ya puedes oírme otra vez.'); }
-      else if (sintesis) { sintesis.cancel(); widget.classList.remove('hablando'); }
+      else callar();
     });
   }
   pintarTonos();
+  pintarEstadoVoz(vocesDisponibles().length);
 
   // -------------------------------------------------- globo de avisos
   let globoTimer = null;

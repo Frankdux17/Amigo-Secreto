@@ -56,7 +56,9 @@
         <button type="button" data-tono="nino">Niño</button>
         <button type="button" data-tono="normal">Normal</button>
       </div>
-      <span class="voz-nota">Se escucha al elegir. Tu preferencia queda guardada.</span>
+      <button class="voz-probar" id="voz-probar" type="button">▶ Probar la voz</button>
+      <span class="voz-estado" id="voz-estado"></span>
+      <span class="voz-nota">Si no oyes nada: sube el volumen y vuelve a pulsar «Probar». Tu elección queda guardada.</span>
     </div>
 
     <div class="duende-msjs" id="duende-msjs"></div>
@@ -91,7 +93,7 @@
 
 <script id="datos-caminata" type="application/json"><%- JSON.stringify(caminata || []) %></script>
 <script>window.CSRF = '<%= csrfToken %>'; window.HAY_SESION = <%= yo ? 'true' : 'false' %>;</script>
-<script src="/js/app.js"></script>
-<script src="/js/duende.js"></script>
+<script src="/js/app.js?v=<%= build %>"></script>
+<script src="/js/duende.js?v=<%= build %>"></script>
 </body>
 </html>

@@ -16,6 +16,10 @@ const app = express();
 const PORT = process.env.PORT || 3600;
 const EN_PRODUCCION = process.env.NODE_ENV === 'production';
 
+// Identificador de version: cambia en cada despliegue y reinicio, de modo que
+// el navegador descarga los CSS/JS nuevos en vez de servir los cacheados.
+const BUILD = require('./package.json').version + '-' + Date.now().toString(36);
+
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.set('trust proxy', 1);
@@ -83,6 +87,7 @@ app.use(A(async (req, res, next) => {
   res.locals.csrfToken = csrf(req);
   res.locals.flash = req.session.flash || null;
   res.locals.ruta = req.path;
+  res.locals.build = BUILD;
   // fotos que el Papá Noel va paseando por la página
   const gente = await all("SELECT nombre, apodo, foto FROM usuarios WHERE rol = 'participante' AND activo = 1 ORDER BY id");
   res.locals.caminata = gente.map(g => ({ n: g.apodo || String(g.nombre).split(' ')[0], f: g.foto || null }));
