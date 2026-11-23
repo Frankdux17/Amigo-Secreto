@@ -6,7 +6,8 @@ const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
 
-const { db, DB_FILE, getConfig, setConfig, allConfig } = require('./src/db');
+const dbm = require('./src/db');
+const { all, get, run, init, DB_FILE, USA_TURSO, getConfig, setConfig, allConfig } = dbm;
 const SqliteStore = require('./src/session-store');
 const sorteo = require('./src/sorteo');
 const bot = require('./src/bot');
@@ -41,22 +42,26 @@ app.use(session({
 // ------------------------------------------------------------
 //  Helpers
 // ------------------------------------------------------------
+
+// envoltorio para que un error dentro de un handler async llegue a Express
+const A = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
 const Q = {
-  porUsuario: db.prepare('SELECT * FROM usuarios WHERE lower(usuario) = lower(?)'),
-  porId: db.prepare('SELECT * FROM usuarios WHERE id = ?'),
-  listaParticipantes: db.prepare("SELECT * FROM usuarios WHERE rol = 'participante' ORDER BY nombre COLLATE NOCASE"),
-  todos: db.prepare('SELECT * FROM usuarios ORDER BY rol DESC, nombre COLLATE NOCASE')
+  porUsuario: (u) => get('SELECT * FROM usuarios WHERE lower(usuario) = lower(?)', [u]),
+  porId: (id) => get('SELECT * FROM usuarios WHERE id = ?', [id]),
+  listaParticipantes: () => all("SELECT * FROM usuarios WHERE rol = 'participante' ORDER BY nombre COLLATE NOCASE"),
+  todos: () => all('SELECT * FROM usuarios ORDER BY rol DESC, nombre COLLATE NOCASE')
 };
 
-function cupo() {
+async function cupo() {
   const max = parseInt(getConfig('max_participantes') || '8', 10);
-  const total = sorteo.totalParticipantes();
+  const total = await sorteo.totalParticipantes();
   return { max, total, faltan: Math.max(0, max - total), completo: total >= max };
 }
 
-function usuarioActual(req) {
+async function usuarioActual(req) {
   if (!req.session.userId) return null;
-  const u = Q.porId.get(req.session.userId);
+  const u = await Q.porId(req.session.userId);
   if (!u || !u.activo) return null;
   return u;
 }
@@ -67,32 +72,31 @@ function csrf(req) {
   return req.session.csrf;
 }
 
-app.use((req, res, next) => {
-  const u = usuarioActual(req);
+app.use(A(async (req, res, next) => {
+  const u = await usuarioActual(req);
+  req.yo = u;
   res.locals.yo = u;
   res.locals.esAdmin = !!u && u.rol === 'admin';
   res.locals.cfg = allConfig();
-  res.locals.cupo = cupo();
+  res.locals.cupo = await cupo();
   res.locals.sorteoHecho = sorteo.sorteoHecho();
   res.locals.csrfToken = csrf(req);
   res.locals.flash = req.session.flash || null;
   res.locals.ruta = req.path;
   // fotos que el Papá Noel va paseando por la página
-  res.locals.caminata = db.prepare(
-    "SELECT nombre, apodo, foto FROM usuarios WHERE rol = 'participante' AND activo = 1 ORDER BY id"
-  ).all().map(u => ({ n: u.apodo || u.nombre.split(' ')[0], f: u.foto || null }));
+  const gente = await all("SELECT nombre, apodo, foto FROM usuarios WHERE rol = 'participante' AND activo = 1 ORDER BY id");
+  res.locals.caminata = gente.map(g => ({ n: g.apodo || String(g.nombre).split(' ')[0], f: g.foto || null }));
   delete req.session.flash;
   next();
-});
+}));
 
 // valida CSRF en todos los POST
 app.use((req, res, next) => {
   if (req.method !== 'POST') return next();
   const enviado = (req.body && req.body._csrf) || req.get('x-csrf-token');
   if (!enviado || enviado !== req.session.csrf) {
-    if (req.xhr || req.get('accept')?.includes('json')) {
-      return res.status(403).json({ error: 'Token de seguridad inválido. Recarga la página.' });
-    }
+    const quiereJson = req.xhr || (req.get('accept') || '').includes('json');
+    if (quiereJson) return res.status(403).json({ error: 'Token de seguridad inválido. Recarga la página.' });
     req.session.flash = { tipo: 'error', texto: 'Token de seguridad inválido. Vuelve a intentarlo.' };
     return res.redirect(req.get('referer') || '/');
   }
@@ -100,7 +104,7 @@ app.use((req, res, next) => {
 });
 
 function pedirLogin(req, res, next) {
-  if (!usuarioActual(req)) {
+  if (!req.yo) {
     req.session.flash = { tipo: 'error', texto: 'Inicia sesión para continuar.' };
     return res.redirect('/login');
   }
@@ -108,8 +112,7 @@ function pedirLogin(req, res, next) {
 }
 
 function pedirAdmin(req, res, next) {
-  const u = usuarioActual(req);
-  if (!u || u.rol !== 'admin') {
+  if (!req.yo || req.yo.rol !== 'admin') {
     req.session.flash = { tipo: 'error', texto: 'Zona exclusiva del administrador.' };
     return res.redirect('/inicio');
   }
@@ -124,29 +127,26 @@ function validarFoto(dataUrl) {
   if (!dataUrl) return null;
   if (!/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(dataUrl)) return null;
   // ~1.4 MB de base64 como techo (la foto se comprime en el navegador)
-  if (dataUrl.length > 1_900_000) return null;
+  if (dataUrl.length > 1900000) return null;
   return dataUrl;
 }
 
 // ------------------------------------------------------------
 //  Público
 // ------------------------------------------------------------
-app.get('/', (req, res) => {
-  if (usuarioActual(req)) return res.redirect('/inicio');
-  res.render('landing', {
-    titulo: 'Amigo Secreto',
-    participantes: Q.listaParticipantes.all()
-  });
-});
+app.get('/', A(async (req, res) => {
+  if (req.yo) return res.redirect('/inicio');
+  res.render('landing', { titulo: 'Amigo Secreto', participantes: await Q.listaParticipantes() });
+}));
 
 app.get('/login', (req, res) => {
-  if (usuarioActual(req)) return res.redirect('/inicio');
+  if (req.yo) return res.redirect('/inicio');
   res.render('login', { titulo: 'Ingresar' });
 });
 
 const intentos = new Map(); // control básico de fuerza bruta
 
-app.post('/login', (req, res) => {
+app.post('/login', A(async (req, res) => {
   const usuario = limpiar(req.body.usuario);
   const password = req.body.password || '';
   const llave = (req.ip || 'x') + '|' + usuario.toLowerCase();
@@ -157,26 +157,26 @@ app.post('/login', (req, res) => {
     return res.redirect('/login');
   }
 
-  const u = Q.porUsuario.get(usuario);
+  const u = await Q.porUsuario(usuario);
   if (!u || !u.activo || !bcrypt.compareSync(password, u.password_hash)) {
     reg.n += 1;
-    if (reg.n >= 6) { reg.hasta = Date.now() + 60_000; reg.n = 0; }
+    if (reg.n >= 6) { reg.hasta = Date.now() + 60000; reg.n = 0; }
     intentos.set(llave, reg);
     flash(req, 'error', 'Usuario o contraseña incorrectos.');
     return res.redirect('/login');
   }
 
   intentos.delete(llave);
-  req.session.userId = u.id;
+  req.session.userId = Number(u.id);
   req.session.csrf = crypto.randomBytes(24).toString('hex');
   res.redirect('/inicio');
-});
+}));
 
-app.get('/registro', (req, res) => {
-  if (usuarioActual(req)) return res.redirect('/inicio');
-  const c = cupo();
+app.get('/registro', A(async (req, res) => {
+  if (req.yo) return res.redirect('/inicio');
+  const c = await cupo();
   res.render('registro', { titulo: 'Crear mi usuario', datos: {}, errores: [], lleno: c.completo });
-});
+}));
 
 const CAMPOS_OBLIGATORIOS = [
   ['usuario', 'Usuario'],
@@ -193,7 +193,7 @@ const CAMPOS_OBLIGATORIOS = [
   ['deseo1', 'Deseo principal']
 ];
 
-app.post('/registro', (req, res) => {
+app.post('/registro', A(async (req, res) => {
   const d = {};
   for (const k of ['usuario', 'password', 'password2', 'nombre', 'apodo', 'email', 'telefono', 'cumple',
     'gustos', 'no_gustos', 'talla_ropa', 'talla_zapato', 'color_favorito', 'hobbies',
@@ -202,7 +202,7 @@ app.post('/registro', (req, res) => {
   }
 
   const errores = [];
-  const c = cupo();
+  const c = await cupo();
   if (c.completo) errores.push(`Ya se completaron los ${c.max} participantes. Habla con el administrador.`);
 
   for (const [campo, etiqueta] of CAMPOS_OBLIGATORIOS) {
@@ -211,7 +211,7 @@ app.post('/registro', (req, res) => {
   if (d.usuario && !/^[a-zA-Z0-9._-]{3,20}$/.test(d.usuario)) {
     errores.push('El usuario debe tener de 3 a 20 caracteres (letras, números, punto, guion).');
   }
-  if (d.usuario && Q.porUsuario.get(d.usuario)) errores.push('Ese usuario ya está tomado, elige otro.');
+  if (d.usuario && await Q.porUsuario(d.usuario)) errores.push('Ese usuario ya está tomado, elige otro.');
   if (d.email && !/^[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}$/.test(d.email)) errores.push('El correo no tiene un formato válido.');
   if (d.password && d.password.length < 6) errores.push('La contraseña debe tener al menos 6 caracteres.');
   if (d.password !== d.password2) errores.push('Las contraseñas no coinciden.');
@@ -225,12 +225,13 @@ app.post('/registro', (req, res) => {
     return res.status(400).render('registro', { titulo: 'Crear mi usuario', datos: d, errores, lleno: c.completo });
   }
 
-  const info = db.prepare(`INSERT INTO usuarios
-    (usuario, password_hash, nombre, apodo, email, telefono, cumple, gustos, no_gustos,
-     talla_ropa, talla_zapato, color_favorito, hobbies, deseo1, deseo2, deseo3, direccion, foto, rol)
-    VALUES (@usuario, @password_hash, @nombre, @apodo, @email, @telefono, @cumple, @gustos, @no_gustos,
-     @talla_ropa, @talla_zapato, @color_favorito, @hobbies, @deseo1, @deseo2, @deseo3, @direccion, @foto, 'participante')`)
-    .run({
+  const info = await run(
+    `INSERT INTO usuarios
+      (usuario, password_hash, nombre, apodo, email, telefono, cumple, gustos, no_gustos,
+       talla_ropa, talla_zapato, color_favorito, hobbies, deseo1, deseo2, deseo3, direccion, foto, rol)
+     VALUES (@usuario, @password_hash, @nombre, @apodo, @email, @telefono, @cumple, @gustos, @no_gustos,
+       @talla_ropa, @talla_zapato, @color_favorito, @hobbies, @deseo1, @deseo2, @deseo3, @direccion, @foto, 'participante')`,
+    {
       usuario: d.usuario,
       password_hash: bcrypt.hashSync(d.password, 10),
       nombre: d.nombre, apodo: d.apodo || null, email: d.email, telefono: d.telefono,
@@ -238,19 +239,20 @@ app.post('/registro', (req, res) => {
       talla_ropa: d.talla_ropa, talla_zapato: d.talla_zapato, color_favorito: d.color_favorito,
       hobbies: d.hobbies, deseo1: d.deseo1, deseo2: d.deseo2 || null, deseo3: d.deseo3 || null,
       direccion: d.direccion || null, foto: foto
-    });
+    }
+  );
 
   // los deseos iniciales alimentan al bot
-  for (const t of [d.deseo1, d.deseo2, d.deseo3].filter(Boolean)) bot.guardarDeseo(info.lastInsertRowid, t);
+  for (const t of [d.deseo1, d.deseo2, d.deseo3].filter(Boolean)) await bot.guardarDeseo(info.lastInsertRowid, t);
 
-  const r = sorteo.sortearSiEstaCompleto();
+  const r = await sorteo.sortearSiEstaCompleto();
   req.session.userId = info.lastInsertRowid;
   req.session.csrf = crypto.randomBytes(24).toString('hex');
   flash(req, 'ok', r.ok
     ? '¡Bienvenido! Se completaron los participantes y el sorteo ya se realizó. Abre tu regalo 🎁'
     : '¡Tu usuario fue creado! 🎄');
   res.redirect('/inicio');
-});
+}));
 
 app.post('/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/'));
@@ -259,23 +261,22 @@ app.post('/logout', (req, res) => {
 // ------------------------------------------------------------
 //  Zona privada
 // ------------------------------------------------------------
-app.get('/inicio', pedirLogin, (req, res) => {
-  const yo = usuarioActual(req);
-  const asignado = yo.rol === 'participante' ? sorteo.asignacionDe(yo.id) : null;
+app.get('/inicio', pedirLogin, A(async (req, res) => {
+  const yo = req.yo;
+  const asignado = yo.rol === 'participante' ? await sorteo.asignacionDe(yo.id) : null;
   res.render('dashboard', {
     titulo: 'Mi Navidad',
     asignado,
-    misDeseos: bot.deseosDe(yo.id),
-    participantes: Q.listaParticipantes.all(),
-    parejas: yo.rol === 'admin' ? sorteo.todasLasAsignaciones() : []
+    misDeseos: await bot.deseosDe(yo.id),
+    participantes: await Q.listaParticipantes(),
+    parejas: yo.rol === 'admin' ? await sorteo.todasLasAsignaciones() : []
   });
-});
+}));
 
-app.post('/revelar', pedirLogin, (req, res) => {
-  const yo = usuarioActual(req);
-  const a = sorteo.asignacionDe(yo.id);
+app.post('/revelar', pedirLogin, A(async (req, res) => {
+  const a = await sorteo.asignacionDe(req.yo.id);
   if (!a) return res.status(404).json({ error: 'Aún no hay sorteo.' });
-  sorteo.marcarVisto(yo.id);
+  await sorteo.marcarVisto(req.yo.id);
   res.json({
     ok: true,
     amigo: {
@@ -286,40 +287,35 @@ app.post('/revelar', pedirLogin, (req, res) => {
       no_gustos: a.no_gustos
     }
   });
-});
+}));
 
-app.get('/participantes', pedirLogin, (req, res) => {
-  res.render('participantes', {
-    titulo: 'Los amigos',
-    participantes: Q.listaParticipantes.all()
-  });
-});
+app.get('/participantes', pedirLogin, A(async (req, res) => {
+  res.render('participantes', { titulo: 'Los amigos', participantes: await Q.listaParticipantes() });
+}));
 
-app.get('/participante/:id', pedirLogin, (req, res) => {
-  const yo = usuarioActual(req);
-  const u = Q.porId.get(req.params.id);
+app.get('/participante/:id', pedirLogin, A(async (req, res) => {
+  const yo = req.yo;
+  const u = await Q.porId(req.params.id);
   if (!u || u.rol !== 'participante') {
     flash(req, 'error', 'Ese participante no existe.');
     return res.redirect('/participantes');
   }
-  const mio = sorteo.asignacionDe(yo.id);
-  const esMiAmigo = !!mio && mio.id === u.id;
+  const mio = await sorteo.asignacionDe(yo.id);
+  const esMiAmigo = !!mio && Number(mio.id) === Number(u.id);
   // La lista privada del bot solo se muestra si es MI amigo secreto (o soy admin)
-  const deseosBot = (esMiAmigo || yo.rol === 'admin') ? bot.deseosDe(u.id) : [];
+  const deseosBot = (esMiAmigo || yo.rol === 'admin') ? await bot.deseosDe(u.id) : [];
   res.render('participante', {
-    titulo: u.nombre,
-    u, esMiAmigo, deseosBot,
-    soyYo: yo.id === u.id
+    titulo: u.nombre, u, esMiAmigo, deseosBot,
+    soyYo: Number(yo.id) === Number(u.id)
   });
-});
+}));
 
-app.get('/perfil', pedirLogin, (req, res) => {
-  const yo = usuarioActual(req);
-  res.render('perfil', { titulo: 'Mi perfil', datos: yo, errores: [], misDeseos: bot.deseosDe(yo.id) });
-});
+app.get('/perfil', pedirLogin, A(async (req, res) => {
+  res.render('perfil', { titulo: 'Mi perfil', datos: req.yo, errores: [], misDeseos: await bot.deseosDe(req.yo.id) });
+}));
 
-app.post('/perfil', pedirLogin, (req, res) => {
-  const yo = usuarioActual(req);
+app.post('/perfil', pedirLogin, A(async (req, res) => {
+  const yo = req.yo;
   const d = {};
   for (const k of ['nombre', 'apodo', 'email', 'telefono', 'cumple', 'gustos', 'no_gustos',
     'talla_ropa', 'talla_zapato', 'color_favorito', 'hobbies', 'deseo1', 'deseo2', 'deseo3',
@@ -345,167 +341,165 @@ app.post('/perfil', pedirLogin, (req, res) => {
       titulo: 'Mi perfil',
       datos: Object.assign({}, yo, d),
       errores,
-      misDeseos: bot.deseosDe(yo.id)
+      misDeseos: await bot.deseosDe(yo.id)
     });
   }
 
-  db.prepare(`UPDATE usuarios SET nombre=@nombre, apodo=@apodo, email=@email, telefono=@telefono,
-      cumple=@cumple, gustos=@gustos, no_gustos=@no_gustos, talla_ropa=@talla_ropa,
-      talla_zapato=@talla_zapato, color_favorito=@color_favorito, hobbies=@hobbies,
-      deseo1=@deseo1, deseo2=@deseo2, deseo3=@deseo3, direccion=@direccion,
-      foto = COALESCE(@foto, foto)
-      WHERE id=@id`).run({
-    id: yo.id,
-    nombre: d.nombre, apodo: d.apodo || null, email: d.email, telefono: d.telefono,
-    cumple: d.cumple || null, gustos: d.gustos, no_gustos: d.no_gustos || null,
-    talla_ropa: d.talla_ropa, talla_zapato: d.talla_zapato, color_favorito: d.color_favorito,
-    hobbies: d.hobbies, deseo1: d.deseo1, deseo2: d.deseo2 || null, deseo3: d.deseo3 || null,
-    direccion: d.direccion || null, foto: fotoNueva === undefined ? null : fotoNueva
-  });
+  await run(
+    `UPDATE usuarios SET nombre=@nombre, apodo=@apodo, email=@email, telefono=@telefono,
+        cumple=@cumple, gustos=@gustos, no_gustos=@no_gustos, talla_ropa=@talla_ropa,
+        talla_zapato=@talla_zapato, color_favorito=@color_favorito, hobbies=@hobbies,
+        deseo1=@deseo1, deseo2=@deseo2, deseo3=@deseo3, direccion=@direccion,
+        foto = COALESCE(@foto, foto)
+      WHERE id=@id`,
+    {
+      id: Number(yo.id),
+      nombre: d.nombre, apodo: d.apodo || null, email: d.email, telefono: d.telefono,
+      cumple: d.cumple || null, gustos: d.gustos, no_gustos: d.no_gustos || null,
+      talla_ropa: d.talla_ropa, talla_zapato: d.talla_zapato, color_favorito: d.color_favorito,
+      hobbies: d.hobbies, deseo1: d.deseo1, deseo2: d.deseo2 || null, deseo3: d.deseo3 || null,
+      direccion: d.direccion || null, foto: fotoNueva === undefined ? null : fotoNueva
+    }
+  );
 
   if (d.password) {
-    db.prepare('UPDATE usuarios SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(d.password, 10), yo.id);
+    await run('UPDATE usuarios SET password_hash = ? WHERE id = ?', [bcrypt.hashSync(d.password, 10), Number(yo.id)]);
   }
-  for (const t of [d.deseo1, d.deseo2, d.deseo3].filter(Boolean)) bot.guardarDeseo(yo.id, t);
+  for (const t of [d.deseo1, d.deseo2, d.deseo3].filter(Boolean)) await bot.guardarDeseo(yo.id, t);
 
   flash(req, 'ok', 'Perfil actualizado ✅');
   res.redirect('/perfil');
-});
+}));
 
-app.post('/perfil/deseo', pedirLogin, (req, res) => {
-  const yo = usuarioActual(req);
+app.post('/perfil/deseo', pedirLogin, A(async (req, res) => {
   const texto = limpiar(req.body.texto);
-  const ok = bot.guardarDeseo(yo.id, texto);
-  if (req.get('accept')?.includes('json')) return res.json({ ok });
+  const ok = await bot.guardarDeseo(req.yo.id, texto);
+  if ((req.get('accept') || '').includes('json')) return res.json({ ok });
   flash(req, ok ? 'ok' : 'error', ok ? 'Agregado a tu lista de deseos 🎁' : 'No se pudo agregar (vacío o repetido).');
   res.redirect('/perfil');
-});
+}));
 
 // ------------------------------------------------------------
 //  Bot
 // ------------------------------------------------------------
-app.get('/bot', pedirLogin, (req, res) => {
-  const yo = usuarioActual(req);
-  const a = sorteo.asignacionDe(yo.id);
+app.get('/bot', pedirLogin, A(async (req, res) => {
+  const a = await sorteo.asignacionDe(req.yo.id);
   res.render('bot', {
     titulo: 'Duende Ayudante',
-    historial: bot.historial(yo.id),
+    historial: await bot.historial(req.yo.id),
     tieneAmigo: !!a,
-    misDeseos: bot.deseosDe(yo.id)
+    misDeseos: await bot.deseosDe(req.yo.id)
   });
-});
+}));
 
 // Estado que alimenta al duende flotante y al aviso automático del sorteo.
 // Solo devuelve datos del usuario en sesión: nunca la asignación de otro.
-app.get('/api/estado', pedirLogin, (req, res) => {
-  const yo = usuarioActual(req);
-  const c = cupo();
-  const a = yo.rol === 'participante' ? sorteo.asignacionDe(yo.id) : null;
+app.get('/api/estado', pedirLogin, A(async (req, res) => {
+  const yo = req.yo;
+  const c = await cupo();
+  const a = yo.rol === 'participante' ? await sorteo.asignacionDe(yo.id) : null;
+  let amigo = null;
+  if (a) {
+    const extra = (await bot.deseosDe(a.id)).map(d => d.texto);
+    amigo = {
+      id: Number(a.id), nombre: a.nombre, apodo: a.apodo, foto: a.foto,
+      gustos: a.gustos, hobbies: a.hobbies, color_favorito: a.color_favorito,
+      talla_ropa: a.talla_ropa, talla_zapato: a.talla_zapato, no_gustos: a.no_gustos,
+      deseos: [a.deseo1, a.deseo2, a.deseo3].filter(Boolean).concat(extra)
+        .filter((v, i, arr) => arr.indexOf(v) === i)
+    };
+  }
   res.json({
-    yo: { id: yo.id, nombre: yo.nombre, apodo: yo.apodo, rol: yo.rol },
+    yo: { id: Number(yo.id), nombre: yo.nombre, apodo: yo.apodo, rol: yo.rol },
     cupo: c,
     sorteoHecho: sorteo.sorteoHecho(),
     visto: a ? !!a.visto : false,
     evento: { monto: getConfig('monto'), fecha: getConfig('fecha_evento'), lugar: getConfig('lugar') },
-    amigo: a ? {
-      id: a.id,
-      nombre: a.nombre,
-      apodo: a.apodo,
-      foto: a.foto,
-      gustos: a.gustos,
-      hobbies: a.hobbies,
-      color_favorito: a.color_favorito,
-      talla_ropa: a.talla_ropa,
-      talla_zapato: a.talla_zapato,
-      no_gustos: a.no_gustos,
-      deseos: [a.deseo1, a.deseo2, a.deseo3].filter(Boolean)
-        .concat(bot.deseosDe(a.id).map(d => d.texto))
-        .filter((v, i, arr) => arr.indexOf(v) === i)
-    } : null
+    amigo
   });
-});
+}));
 
-app.post('/api/bot', pedirLogin, (req, res) => {
-  const yo = usuarioActual(req);
+app.post('/api/bot', pedirLogin, A(async (req, res) => {
+  const yo = req.yo;
   const texto = limpiar(req.body.texto);
   if (!texto) return res.status(400).json({ error: 'Escribe algo 🙂' });
   if (texto.length > 500) return res.status(400).json({ error: 'Mensaje demasiado largo.' });
-  const asignado = sorteo.asignacionDe(yo.id);
-  const amigo = asignado ? Q.porId.get(asignado.id) : null;
-  const r = bot.responder({ user: yo, amigo, texto });
-  res.json({ ok: true, reply: r.reply, aprendido: r.aprendido, deseos: bot.deseosDe(yo.id) });
-});
+  const asignado = await sorteo.asignacionDe(yo.id);
+  const amigo = asignado ? await Q.porId(asignado.id) : null;
+  const r = await bot.responder({ user: yo, amigo, texto });
+  res.json({ ok: true, reply: r.reply, aprendido: r.aprendido, deseos: await bot.deseosDe(yo.id) });
+}));
 
 // ------------------------------------------------------------
 //  Administración
 // ------------------------------------------------------------
-app.get('/admin', pedirLogin, pedirAdmin, (req, res) => {
-  const yo = usuarioActual(req);
+app.get('/admin', pedirLogin, pedirAdmin, A(async (req, res) => {
   res.render('admin', {
     titulo: 'Panel de administración',
-    usuarios: Q.todos.all(),
-    parejas: sorteo.todasLasAsignaciones(),
+    usuarios: await Q.todos(),
+    parejas: await sorteo.todasLasAsignaciones(),
     dbFile: DB_FILE,
+    usaTurso: USA_TURSO,
     // aviso si el admin sigue con la contraseña por defecto
-    claveInsegura: bcrypt.compareSync('admin123', yo.password_hash)
+    claveInsegura: bcrypt.compareSync('admin123', req.yo.password_hash)
   });
-});
+}));
 
-app.post('/admin/config', pedirLogin, pedirAdmin, (req, res) => {
+app.post('/admin/config', pedirLogin, pedirAdmin, A(async (req, res) => {
   const max = parseInt(req.body.max_participantes, 10);
-  if (Number.isFinite(max) && max >= 3 && max <= 100) setConfig('max_participantes', max);
+  if (Number.isFinite(max) && max >= 3 && max <= 100) await setConfig('max_participantes', max);
   for (const k of ['monto', 'fecha_evento', 'lugar', 'titulo_evento']) {
-    if (req.body[k] !== undefined) setConfig(k, limpiar(req.body[k]));
+    if (req.body[k] !== undefined) await setConfig(k, limpiar(req.body[k]));
   }
   flash(req, 'ok', 'Configuración guardada ✅');
   res.redirect('/admin');
-});
+}));
 
-app.post('/admin/sorteo', pedirLogin, pedirAdmin, (req, res) => {
-  const r = sorteo.ejecutarSorteo({ forzar: req.body.forzar === '1' });
+app.post('/admin/sorteo', pedirLogin, pedirAdmin, A(async (req, res) => {
+  const r = await sorteo.ejecutarSorteo({ forzar: req.body.forzar === '1' });
   flash(req, r.ok ? 'ok' : 'error', r.ok ? `🎲 ${r.motivo} (${r.total} participantes)` : r.motivo);
   res.redirect('/admin');
-});
+}));
 
-app.post('/admin/reiniciar', pedirLogin, pedirAdmin, (req, res) => {
-  sorteo.reiniciarSorteo();
+app.post('/admin/reiniciar', pedirLogin, pedirAdmin, A(async (req, res) => {
+  await sorteo.reiniciarSorteo();
   flash(req, 'ok', 'Sorteo reiniciado. Nadie tiene amigo secreto asignado.');
   res.redirect('/admin');
-});
+}));
 
-app.post('/admin/usuario/:id/foto', pedirLogin, pedirAdmin, (req, res) => {
+app.post('/admin/usuario/:id/foto', pedirLogin, pedirAdmin, A(async (req, res) => {
   const foto = validarFoto(limpiar(req.body.foto));
   if (!foto) { flash(req, 'error', 'Foto inválida o muy pesada.'); return res.redirect('/admin'); }
-  db.prepare('UPDATE usuarios SET foto = ? WHERE id = ?').run(foto, req.params.id);
+  await run('UPDATE usuarios SET foto = ? WHERE id = ?', [foto, Number(req.params.id)]);
   flash(req, 'ok', 'Foto actualizada ✅');
   res.redirect('/admin');
-});
+}));
 
 // El administrador puede cambiar usuario y/o contraseña de quien lo solicite
-app.post('/admin/usuario/:id/credenciales', pedirLogin, pedirAdmin, (req, res) => {
-  const u = Q.porId.get(req.params.id);
+app.post('/admin/usuario/:id/credenciales', pedirLogin, pedirAdmin, A(async (req, res) => {
+  const u = await Q.porId(req.params.id);
   if (!u) { flash(req, 'error', 'Usuario no encontrado.'); return res.redirect('/admin'); }
 
   const nuevoUsuario = limpiar(req.body.usuario);
   const nueva = limpiar(req.body.password);
   const cambios = [];
 
-  if (nuevoUsuario && nuevoUsuario.toLowerCase() !== u.usuario.toLowerCase()) {
+  if (nuevoUsuario && nuevoUsuario.toLowerCase() !== String(u.usuario).toLowerCase()) {
     if (!/^[a-zA-Z0-9._-]{3,20}$/.test(nuevoUsuario)) {
       flash(req, 'error', 'El usuario debe tener de 3 a 20 caracteres (letras, números, punto, guion).');
       return res.redirect('/admin');
     }
-    if (Q.porUsuario.get(nuevoUsuario)) {
+    if (await Q.porUsuario(nuevoUsuario)) {
       flash(req, 'error', `El usuario "${nuevoUsuario}" ya está tomado.`);
       return res.redirect('/admin');
     }
-    db.prepare('UPDATE usuarios SET usuario = ? WHERE id = ?').run(nuevoUsuario, u.id);
+    await run('UPDATE usuarios SET usuario = ? WHERE id = ?', [nuevoUsuario, Number(u.id)]);
     cambios.push(`usuario → ${nuevoUsuario}`);
   }
 
   if (nueva) {
     if (nueva.length < 6) { flash(req, 'error', 'La contraseña debe tener al menos 6 caracteres.'); return res.redirect('/admin'); }
-    db.prepare('UPDATE usuarios SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(nueva, 10), u.id);
+    await run('UPDATE usuarios SET password_hash = ? WHERE id = ?', [bcrypt.hashSync(nueva, 10), Number(u.id)]);
     cambios.push('contraseña restablecida');
   }
 
@@ -513,81 +507,98 @@ app.post('/admin/usuario/:id/credenciales', pedirLogin, pedirAdmin, (req, res) =
     cambios.length ? `Credenciales de ${u.nombre} actualizadas (${cambios.join(', ')}) ✅`
                    : 'No indicaste ningún cambio.');
   res.redirect('/admin');
-});
+}));
 
-app.post('/admin/usuario/:id/estado', pedirLogin, pedirAdmin, (req, res) => {
-  const u = Q.porId.get(req.params.id);
+app.post('/admin/usuario/:id/estado', pedirLogin, pedirAdmin, A(async (req, res) => {
+  const u = await Q.porId(req.params.id);
   if (!u || u.rol === 'admin') { flash(req, 'error', 'Operación no permitida.'); return res.redirect('/admin'); }
-  db.prepare('UPDATE usuarios SET activo = ? WHERE id = ?').run(u.activo ? 0 : 1, u.id);
+  await run('UPDATE usuarios SET activo = ? WHERE id = ?', [u.activo ? 0 : 1, Number(u.id)]);
   flash(req, 'ok', u.activo ? 'Participante desactivado.' : 'Participante reactivado.');
   res.redirect('/admin');
-});
+}));
 
-app.post('/admin/usuario/:id/eliminar', pedirLogin, pedirAdmin, (req, res) => {
-  const u = Q.porId.get(req.params.id);
+app.post('/admin/usuario/:id/eliminar', pedirLogin, pedirAdmin, A(async (req, res) => {
+  const u = await Q.porId(req.params.id);
   if (!u || u.rol === 'admin') { flash(req, 'error', 'No se puede eliminar al administrador.'); return res.redirect('/admin'); }
-  db.prepare('DELETE FROM usuarios WHERE id = ?').run(u.id);
+  await run('DELETE FROM usuarios WHERE id = ?', [Number(u.id)]);
   if (sorteo.sorteoHecho()) {
-    sorteo.reiniciarSorteo();
+    await sorteo.reiniciarSorteo();
     flash(req, 'ok', `"${u.nombre}" fue eliminado. El sorteo se reinició porque cambió la lista.`);
   } else {
     flash(req, 'ok', `"${u.nombre}" fue eliminado.`);
   }
   res.redirect('/admin');
-});
+}));
 
-app.post('/admin/usuario/:id/editar', pedirLogin, pedirAdmin, (req, res) => {
-  const u = Q.porId.get(req.params.id);
+app.post('/admin/usuario/:id/editar', pedirLogin, pedirAdmin, A(async (req, res) => {
+  const u = await Q.porId(req.params.id);
   if (!u) { flash(req, 'error', 'Usuario no encontrado.'); return res.redirect('/admin'); }
   const campos = ['nombre', 'apodo', 'email', 'telefono', 'gustos', 'no_gustos', 'talla_ropa',
     'talla_zapato', 'color_favorito', 'hobbies', 'deseo1', 'deseo2', 'deseo3'];
-  const datos = { id: u.id };
-  for (const k of campos) datos[k] = limpiar(req.body[k]) || u[k];
-  db.prepare(`UPDATE usuarios SET nombre=@nombre, apodo=@apodo, email=@email, telefono=@telefono,
-      gustos=@gustos, no_gustos=@no_gustos, talla_ropa=@talla_ropa, talla_zapato=@talla_zapato,
-      color_favorito=@color_favorito, hobbies=@hobbies, deseo1=@deseo1, deseo2=@deseo2, deseo3=@deseo3
-      WHERE id=@id`).run(datos);
+  const datos = { id: Number(u.id) };
+  for (const k of campos) datos[k] = limpiar(req.body[k]) || u[k] || null;
+  await run(
+    `UPDATE usuarios SET nombre=@nombre, apodo=@apodo, email=@email, telefono=@telefono,
+        gustos=@gustos, no_gustos=@no_gustos, talla_ropa=@talla_ropa, talla_zapato=@talla_zapato,
+        color_favorito=@color_favorito, hobbies=@hobbies, deseo1=@deseo1, deseo2=@deseo2, deseo3=@deseo3
+      WHERE id=@id`, datos);
   flash(req, 'ok', 'Datos del participante actualizados ✅');
   res.redirect('/admin');
-});
+}));
 
 // crear participante desde el panel (por si alguien no puede registrarse solo)
-app.post('/admin/usuario/nuevo', pedirLogin, pedirAdmin, (req, res) => {
+app.post('/admin/usuario/nuevo', pedirLogin, pedirAdmin, A(async (req, res) => {
   const d = {};
   for (const k of ['usuario', 'password', 'nombre', 'email', 'telefono', 'gustos', 'talla_ropa',
     'talla_zapato', 'color_favorito', 'hobbies', 'deseo1']) d[k] = limpiar(req.body[k]);
   if (Object.values(d).some(v => !v)) { flash(req, 'error', 'Completa todos los campos para crear el participante.'); return res.redirect('/admin'); }
-  if (Q.porUsuario.get(d.usuario)) { flash(req, 'error', 'Ese usuario ya existe.'); return res.redirect('/admin'); }
-  const info = db.prepare(`INSERT INTO usuarios
-    (usuario, password_hash, nombre, email, telefono, gustos, talla_ropa, talla_zapato,
-     color_favorito, hobbies, deseo1, rol)
-    VALUES (@usuario, @password_hash, @nombre, @email, @telefono, @gustos, @talla_ropa, @talla_zapato,
-     @color_favorito, @hobbies, @deseo1, 'participante')`).run({
-    usuario: d.usuario, password_hash: bcrypt.hashSync(d.password, 10), nombre: d.nombre,
-    email: d.email, telefono: d.telefono, gustos: d.gustos, talla_ropa: d.talla_ropa,
-    talla_zapato: d.talla_zapato, color_favorito: d.color_favorito, hobbies: d.hobbies, deseo1: d.deseo1
-  });
-  bot.guardarDeseo(info.lastInsertRowid, d.deseo1);
-  const r = sorteo.sortearSiEstaCompleto();
+  if (await Q.porUsuario(d.usuario)) { flash(req, 'error', 'Ese usuario ya existe.'); return res.redirect('/admin'); }
+  const info = await run(
+    `INSERT INTO usuarios
+      (usuario, password_hash, nombre, email, telefono, gustos, talla_ropa, talla_zapato,
+       color_favorito, hobbies, deseo1, rol)
+     VALUES (@usuario, @password_hash, @nombre, @email, @telefono, @gustos, @talla_ropa, @talla_zapato,
+       @color_favorito, @hobbies, @deseo1, 'participante')`,
+    {
+      usuario: d.usuario, password_hash: bcrypt.hashSync(d.password, 10), nombre: d.nombre,
+      email: d.email, telefono: d.telefono, gustos: d.gustos, talla_ropa: d.talla_ropa,
+      talla_zapato: d.talla_zapato, color_favorito: d.color_favorito, hobbies: d.hobbies, deseo1: d.deseo1
+    }
+  );
+  await bot.guardarDeseo(info.lastInsertRowid, d.deseo1);
+  const r = await sorteo.sortearSiEstaCompleto();
   flash(req, 'ok', r.ok ? 'Participante creado y sorteo realizado 🎲' : 'Participante creado ✅');
   res.redirect('/admin');
-});
+}));
 
 // ------------------------------------------------------------
-app.get('/salud', (req, res) => res.json({ ok: true, db: DB_FILE, ...cupo(), sorteo: sorteo.sorteoHecho() }));
+app.get('/salud', A(async (req, res) => {
+  res.json({ ok: true, almacenamiento: USA_TURSO ? 'turso' : 'archivo local', db: DB_FILE, ...(await cupo()), sorteo: sorteo.sorteoHecho() });
+}));
 
 app.use((req, res) => res.status(404).render('error', { titulo: 'No encontrado', codigo: 404, mensaje: 'Esta página se perdió camino al Polo Norte.' }));
 
 app.use((err, req, res, next) => {
   console.error(err);
+  if (res.headersSent) return next(err);
+  const quiereJson = req.xhr || (req.get('accept') || '').includes('json');
+  if (quiereJson) return res.status(500).json({ error: 'Error interno del servidor.' });
   res.status(500).render('error', { titulo: 'Error', codigo: 500, mensaje: 'Algo salió mal. Revisa la consola del servidor.' });
 });
 
-app.listen(PORT, () => {
-  console.log('');
-  console.log('  🎄 Amigo Secreto Navidad');
-  console.log(`  ➜  http://localhost:${PORT}`);
-  console.log(`  ➜  Base de datos: ${DB_FILE}`);
-  console.log('  ➜  Admin: admin / admin123');
-  console.log('');
-});
+// ------------------------------------------------------------
+init()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log('');
+      console.log('  🎄 Amigo Secreto Navidad');
+      console.log(`  ➜  http://localhost:${PORT}`);
+      console.log(`  ➜  Almacenamiento: ${USA_TURSO ? 'Turso (nube)' : 'archivo local'} — ${DB_FILE}`);
+      console.log(`  ➜  Admin: admin / ${process.env.ADMIN_PASSWORD ? '(definida en ADMIN_PASSWORD)' : 'admin123'}`);
+      console.log('');
+    });
+  })
+  .catch(err => {
+    console.error('No se pudo iniciar la base de datos:', err);
+    process.exit(1);
+  });

@@ -1,22 +1,61 @@
 'use strict';
 
+// ============================================================
+//  Capa de datos (SQLite / libSQL)
+//
+//  - En local: un archivo SQLite dentro del proyecto -> data/amigo_secreto.db
+//  - En producción (Render): la misma base SQLite, pero alojada en Turso,
+//    para que los datos NO vivan dentro del contenedor y sobrevivan a
+//    reinicios y redespliegues.
+//
+//  Basta con definir TURSO_DATABASE_URL y TURSO_AUTH_TOKEN para cambiar de
+//  uno a otro: no hay que tocar una sola línea de código.
+// ============================================================
+
 const path = require('path');
 const fs = require('fs');
-const Database = require('better-sqlite3');
+const { createClient } = require('@libsql/client');
 const bcrypt = require('bcryptjs');
 
-// La base de datos vive DENTRO de la carpeta del proyecto (data/amigo_secreto.db).
-// En Render se puede apuntar a un disco persistente con la variable DB_DIR.
 const DB_DIR = process.env.DB_DIR || path.join(__dirname, '..', 'data');
-if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
+const ARCHIVO_LOCAL = path.join(DB_DIR, 'amigo_secreto.db');
 
-const DB_FILE = path.join(DB_DIR, 'amigo_secreto.db');
-const db = new Database(DB_FILE);
+const USA_TURSO = !!process.env.TURSO_DATABASE_URL;
+if (!USA_TURSO && !fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
 
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+const cliente = createClient(
+  USA_TURSO
+    ? { url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN }
+    : { url: 'file:' + ARCHIVO_LOCAL.replace(/\\/g, '/') }
+);
 
-db.exec(`
+const DB_FILE = USA_TURSO ? process.env.TURSO_DATABASE_URL.replace(/\?.*$/, '') : ARCHIVO_LOCAL;
+
+// ---------- helpers de consulta ----------
+async function all(sql, args = {}) {
+  const r = await cliente.execute({ sql, args });
+  return r.rows;
+}
+
+async function get(sql, args = {}) {
+  const filas = await all(sql, args);
+  return filas.length ? filas[0] : undefined;
+}
+
+async function run(sql, args = {}) {
+  const r = await cliente.execute({ sql, args });
+  return {
+    lastInsertRowid: r.lastInsertRowid == null ? null : Number(r.lastInsertRowid),
+    rowsAffected: r.rowsAffected
+  };
+}
+
+// varias sentencias en una sola transacción
+async function batch(sentencias) {
+  return cliente.batch(sentencias, 'write');
+}
+
+const ESQUEMA = `
 CREATE TABLE IF NOT EXISTS usuarios (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   usuario         TEXT    NOT NULL UNIQUE,
@@ -39,7 +78,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
   foto            TEXT,
   rol             TEXT    NOT NULL DEFAULT 'participante',
   activo          INTEGER NOT NULL DEFAULT 1,
-  creado          TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+  creado          TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS sorteo (
@@ -48,7 +87,7 @@ CREATE TABLE IF NOT EXISTS sorteo (
   recibe_id  INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
   ronda      INTEGER NOT NULL DEFAULT 1,
   visto      INTEGER NOT NULL DEFAULT 0,
-  creado     TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+  creado     TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (dador_id, ronda)
 );
 
@@ -57,13 +96,12 @@ CREATE TABLE IF NOT EXISTS config (
   valor TEXT
 );
 
--- Lo que el bot va aprendiendo de cada usuario (se alimenta de sus respuestas)
 CREATE TABLE IF NOT EXISTS bot_memoria (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id   INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
   tipo      TEXT    NOT NULL DEFAULT 'deseo',
   texto     TEXT    NOT NULL,
-  creado    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+  creado    TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS bot_chat (
@@ -71,7 +109,7 @@ CREATE TABLE IF NOT EXISTS bot_chat (
   user_id   INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
   rol       TEXT    NOT NULL,
   mensaje   TEXT    NOT NULL,
-  creado    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+  creado    TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS sesiones (
@@ -79,9 +117,9 @@ CREATE TABLE IF NOT EXISTS sesiones (
   expira  INTEGER NOT NULL,
   data    TEXT NOT NULL
 );
-`);
+`;
 
-// ---------- config ----------
+// ---------- configuración (en memoria, se lee muchas veces) ----------
 const DEFAULTS = {
   max_participantes: '8',
   monto: 'S/ 50 - S/ 80',
@@ -89,53 +127,78 @@ const DEFAULTS = {
   lugar: 'Por definir',
   titulo_evento: 'Amigo Secreto Navidad 2026',
   sorteo_hecho: '0',
-  ronda_actual: '1'
+  ronda_actual: '1',
+  fecha_sorteo: ''
 };
 
-function getConfig(clave) {
-  const row = db.prepare('SELECT valor FROM config WHERE clave = ?').get(clave);
-  return row ? row.valor : (DEFAULTS[clave] !== undefined ? DEFAULTS[clave] : null);
+let cache = Object.assign({}, DEFAULTS);
+
+async function cargarConfig() {
+  const filas = await all('SELECT clave, valor FROM config');
+  cache = Object.assign({}, DEFAULTS);
+  for (const f of filas) cache[f.clave] = f.valor;
+  return cache;
 }
 
-function setConfig(clave, valor) {
-  db.prepare(`INSERT INTO config (clave, valor) VALUES (?, ?)
-              ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`).run(clave, String(valor));
+function getConfig(clave) {
+  return cache[clave] !== undefined ? cache[clave] : null;
 }
 
 function allConfig() {
-  const out = Object.assign({}, DEFAULTS);
-  for (const r of db.prepare('SELECT clave, valor FROM config').all()) out[r.clave] = r.valor;
-  return out;
+  return Object.assign({}, cache);
 }
 
-for (const [k, v] of Object.entries(DEFAULTS)) {
-  if (!db.prepare('SELECT 1 FROM config WHERE clave = ?').get(k)) setConfig(k, v);
+async function setConfig(clave, valor) {
+  await run(
+    `INSERT INTO config (clave, valor) VALUES (:clave, :valor)
+     ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`,
+    { clave, valor: String(valor) }
+  );
+  cache[clave] = String(valor);
 }
 
-// ---------- administrador por defecto ----------
-function seedAdmin() {
-  const existe = db.prepare("SELECT id FROM usuarios WHERE usuario = 'admin'").get();
-  if (existe) return;
-  db.prepare(`INSERT INTO usuarios
-    (usuario, password_hash, nombre, apodo, email, telefono, gustos, no_gustos,
-     talla_ropa, talla_zapato, color_favorito, hobbies, deseo1, rol)
-    VALUES (@usuario, @password_hash, @nombre, @apodo, @email, @telefono, @gustos, @no_gustos,
-     @talla_ropa, @talla_zapato, @color_favorito, @hobbies, @deseo1, 'admin')`).run({
-    usuario: 'admin',
-    password_hash: bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'admin123', 10),
-    nombre: 'Administrador',
-    apodo: 'Santa Jefe',
-    email: 'admin@navidad.local',
-    telefono: '000000000',
-    gustos: 'Organizar la mejor Navidad',
-    no_gustos: 'El desorden',
-    talla_ropa: 'M',
-    talla_zapato: '40',
-    color_favorito: 'Rojo',
-    hobbies: 'Coordinar el intercambio',
-    deseo1: 'Que todos reciban su regalo'
-  });
-}
-seedAdmin();
+// ---------- arranque ----------
+async function init() {
+  await cliente.executeMultiple(ESQUEMA);
 
-module.exports = { db, DB_FILE, DB_DIR, getConfig, setConfig, allConfig, DEFAULTS };
+  for (const [k, v] of Object.entries(DEFAULTS)) {
+    const existe = await get('SELECT 1 AS x FROM config WHERE clave = ?', [k]);
+    if (!existe) await run('INSERT INTO config (clave, valor) VALUES (?, ?)', [k, v]);
+  }
+  await cargarConfig();
+
+  // administrador por defecto
+  const admin = await get("SELECT id FROM usuarios WHERE usuario = 'admin'");
+  if (!admin) {
+    await run(
+      `INSERT INTO usuarios
+        (usuario, password_hash, nombre, apodo, email, telefono, gustos, no_gustos,
+         talla_ropa, talla_zapato, color_favorito, hobbies, deseo1, rol)
+       VALUES (@usuario, @password_hash, @nombre, @apodo, @email, @telefono, @gustos, @no_gustos,
+         @talla_ropa, @talla_zapato, @color_favorito, @hobbies, @deseo1, 'admin')`,
+      {
+        usuario: 'admin',
+        password_hash: bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'admin123', 10),
+        nombre: 'Administrador',
+        apodo: 'Santa Jefe',
+        email: 'admin@navidad.local',
+        telefono: '000000000',
+        gustos: 'Organizar la mejor Navidad',
+        no_gustos: 'El desorden',
+        talla_ropa: 'M',
+        talla_zapato: '40',
+        color_favorito: 'Rojo',
+        hobbies: 'Coordinar el intercambio',
+        deseo1: 'Que todos reciban su regalo'
+      }
+    );
+  }
+
+  return { USA_TURSO, DB_FILE };
+}
+
+module.exports = {
+  cliente, init, all, get, run, batch,
+  getConfig, setConfig, allConfig, cargarConfig,
+  DB_FILE, DB_DIR, USA_TURSO, DEFAULTS
+};

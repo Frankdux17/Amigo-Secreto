@@ -2,7 +2,7 @@ services:
   - type: web
     name: amigo-secreto-navidad
     runtime: node
-    plan: starter          # necesario para disco persistente (SQLite).
+    plan: free
     region: oregon
     buildCommand: npm ci
     startCommand: npm start
@@ -10,11 +10,24 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+
+      # Render genera un secreto seguro automáticamente
       - key: SESSION_SECRET
-        generateValue: true   # Render genera un secreto seguro automáticamente
-      - key: DB_DIR
-        value: /var/data      # carpeta del disco persistente
-    disk:
-      name: datos-amigo-secreto
-      mountPath: /var/data
-      sizeGB: 1
+        generateValue: true
+
+      # Contraseña inicial del administrador.
+      # Se pide al crear el Blueprint: NO uses admin123 en un enlace público.
+      - key: ADMIN_PASSWORD
+        sync: false
+
+      # --- Turso: SQLite alojado en la nube -------------------------------
+      # Sin estas dos variables la app escribe en data/amigo_secreto.db,
+      # que en el plan free de Render se borra en cada reinicio.
+      # Con ellas, los datos viven fuera del contenedor y persisten.
+      #   turso db create amigo-secreto
+      #   turso db show amigo-secreto --url      -> TURSO_DATABASE_URL
+      #   turso db tokens create amigo-secreto   -> TURSO_AUTH_TOKEN
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false

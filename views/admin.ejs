@@ -236,13 +236,24 @@
 
   <div class="tarjeta">
     <h2>🗄️ Base de datos</h2>
-    <p class="silencio" style="margin-top:-6px">
-      Todo se guarda en un archivo SQLite dentro del proyecto:
-    </p>
-    <code style="display:block;padding:12px 14px;background:rgba(0,0,0,.35);border-radius:12px;font-size:.82rem;word-break:break-all"><%= dbFile %></code>
-    <p class="ayuda" style="margin-top:10px">
-      Puedes copiar ese archivo para respaldar todo el intercambio (usuarios, fotos, sorteo y conversaciones del duende).
-    </p>
+    <% if (usaTurso) { %>
+      <p class="silencio" style="margin-top:-6px">
+        Los datos están en <strong>Turso</strong> (SQLite en la nube), fuera del contenedor,
+        así que <strong>no se pierden</strong> aunque el servicio se reinicie o se vuelva a desplegar.
+      </p>
+      <code style="display:block;padding:12px 14px;background:rgba(0,0,0,.35);border-radius:12px;font-size:.82rem;word-break:break-all"><%= dbFile %></code>
+      <p class="ayuda" style="margin-top:10px">
+        Para respaldar: <code>turso db shell &lt;tu-base&gt; .dump &gt; respaldo.sql</code>
+      </p>
+    <% } else { %>
+      <p class="silencio" style="margin-top:-6px">
+        Todo se guarda en un archivo SQLite dentro del proyecto:
+      </p>
+      <code style="display:block;padding:12px 14px;background:rgba(0,0,0,.35);border-radius:12px;font-size:.82rem;word-break:break-all"><%= dbFile %></code>
+      <p class="ayuda" style="margin-top:10px">
+        Puedes copiar ese archivo para respaldar todo el intercambio (usuarios, fotos, sorteo y conversaciones del duende).
+      </p>
+    <% } %>
   </div>
 </main>
 

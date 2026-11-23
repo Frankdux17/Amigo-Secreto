@@ -5,7 +5,7 @@ Aplicación web para el intercambio de regalos navideño entre amigos: registro 
 asignaciones privadas), fotos, panel de administración y un **bot duende** que sugiere regalos y
 guarda lo que cada quien quiere recibir.
 
-Todo se guarda en **SQLite**, en un único archivo dentro del proyecto: `data/amigo_secreto.db`.
+Todo se guarda en **SQLite**: en tu PC, en un archivo dentro del proyecto (`data/amigo_secreto.db`); en producción, en **Turso** (SQLite alojado) para que los datos no se pierdan.
 
 ---
 
@@ -88,44 +88,62 @@ lima `#a4bf41`) combinada con rojo y oro navideños sobre un fondo nocturno, y t
 
 ---
 
-## ☁️ Subirlo a Render
+## 🗄️ Dónde se guardan los datos
 
-### Opción A — con `render.yaml` (recomendada)
+La app usa **SQLite** siempre. Lo único que cambia es dónde vive el archivo:
 
-1. Sube el proyecto a un repositorio de GitHub.
-2. En Render: **New → Blueprint**, elige el repositorio. Render lee `render.yaml` y crea
-   el servicio con su disco persistente.
-3. Listo. La app queda en `https://<tu-servicio>.onrender.com`.
+| Entorno | Almacenamiento | Se configura con |
+|---|---|---|
+| Tu PC (local) | `data/amigo_secreto.db` dentro del proyecto | nada, es el modo por defecto |
+| Render | **Turso** (SQLite alojado, plan gratuito) | `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` |
 
-### Opción B — manual
+> **Por qué hace falta Turso.** En Render el proyecto vive dentro de un contenedor que se
+> **recrea** en cada redespliegue y cada vez que el servicio despierta. Un archivo escrito ahí
+> —sea SQLite o una foto— se borra. Turso guarda la misma base SQLite fuera del contenedor, así
+> que los usuarios, las fotos y el sorteo **no se pierden nunca**, y además el plan gratuito
+> sobra para 9 usuarios.
 
-1. **New → Web Service** y conecta el repositorio.
-2. Configura:
-   - **Runtime:** Node
-   - **Build Command:** `npm ci`
-   - **Start Command:** `npm start`
-   - **Health Check Path:** `/salud`
-3. **Environment → Add Environment Variable**:
-   | Variable | Valor |
-   |---|---|
-   | `NODE_ENV` | `production` |
-   | `SESSION_SECRET` | una cadena larga y aleatoria |
-   | `DB_DIR` | `/var/data` |
-4. **Disks → Add Disk**: nombre `datos-amigo-secreto`, **Mount Path** `/var/data`, 1 GB.
+La app detecta sola el modo: si existe `TURSO_DATABASE_URL` usa Turso, si no, el archivo local.
+En `/salud` y en el panel de administración se ve cuál está activo.
 
-### ⚠️ Importante sobre el plan gratuito
+---
 
-El disco persistente **solo está disponible en planes de pago** (Starter en adelante).
-En el plan **Free** el sistema de archivos es efímero: cada vez que Render reinicie o
-redespliegue el servicio **se perderían los usuarios, fotos y el sorteo**.
+## ☁️ Subirlo a Render (gratis)
 
-- Si usas el plan **Free**, no definas `DB_DIR`: la base vivirá en `data/` dentro del
-  contenedor y servirá solo para pruebas. Haz el sorteo real cuando ya estén todos dentro
-  y descarga un respaldo.
-- Para el intercambio de verdad, usa el plan **Starter** con el disco montado en `/var/data`.
+### 1. Crear la base en Turso
 
-Además, en el plan Free el servicio se duerme tras 15 minutos sin tráfico: la primera visita
-después tarda unos segundos en responder.
+Entra a [turso.tech](https://turso.tech), crea una cuenta gratuita y luego, desde su panel web o
+con su CLI:
+
+```bash
+turso db create amigo-secreto
+turso db show amigo-secreto --url       # -> libsql://amigo-secreto-xxxx.turso.io
+turso db tokens create amigo-secreto    # -> el token (una cadena larga)
+```
+
+Guarda esos dos valores: son `TURSO_DATABASE_URL` y `TURSO_AUTH_TOKEN`.
+
+### 2. Desplegar en Render
+
+1. En Render: **New → Blueprint** y elige el repositorio `Amigo-Secreto`.
+2. Render lee `render.yaml` y pide las variables marcadas como `sync: false`:
+   - `TURSO_DATABASE_URL` → la URL del paso 1
+   - `TURSO_AUTH_TOKEN` → el token del paso 1
+   - `ADMIN_PASSWORD` → la contraseña que quieras para el usuario `admin`
+     (**no dejes `admin123`** en un enlace público: quien la conozca vería todas las parejas)
+3. **Apply** y espera el build (~3 minutos).
+
+Listo: queda en `https://amigo-secreto-navidad.onrender.com`.
+
+### Antes de mandar el link a tus amigos
+
+1. Entra tú como `admin` con la contraseña que pusiste.
+2. En **Admin → Configuración del evento** ajusta el monto, la fecha y el lugar.
+3. Comprueba en **Admin → Base de datos** que dice *«Los datos están en Turso»*.
+4. Recién ahí comparte el enlace. Cada amigo entra a **Crear mi usuario**.
+
+> En el plan gratuito de Render el servicio se duerme tras 15 minutos sin visitas: la primera
+> carga después puede tardar ~30 segundos. Los datos **no** se pierden, porque están en Turso.
 
 ---
 
@@ -147,7 +165,7 @@ después tarda unos segundos en responder.
 amigo-secreto/
 ├── server.js              # rutas y arranque del servidor Express
 ├── src/
-│   ├── db.js              # conexión SQLite, esquema y configuración
+│   ├── db.js              # conexión SQLite/Turso, esquema y configuración
 │   ├── sorteo.js          # algoritmo del sorteo (ciclo único aleatorio)
 │   ├── bot.js             # duende: catálogo de ideas y memoria de deseos
 │   └── session-store.js   # sesiones guardadas en SQLite
@@ -159,8 +177,8 @@ amigo-secreto/
 
 ## 💾 Respaldo
 
-Copia el archivo `data/amigo_secreto.db`: contiene usuarios, fotos, sorteo y conversaciones.
-En Render puedes descargarlo desde la shell del servicio (`/var/data/amigo_secreto.db`).
+En local: copia el archivo `data/amigo_secreto.db` (contiene usuarios, fotos, sorteo y conversaciones).
+En Turso: `turso db shell amigo-secreto .dump > respaldo.sql`.
 
 ## 🧹 Empezar de cero
 

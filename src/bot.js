@@ -7,7 +7,7 @@
 //  amigo secreto lo puede consultar.
 // ============================================================
 
-const { db, getConfig } = require('./db');
+const { all, get, run, getConfig } = require('./db');
 
 const norm = (s) => (s || '')
   .toLowerCase()
@@ -74,26 +74,27 @@ function pick(arr, n = 1) {
 }
 
 // ---------- memoria (wishlist que alimenta el usuario) ----------
-function guardarDeseo(userId, texto, tipo = 'deseo') {
+async function guardarDeseo(userId, texto, tipo = 'deseo') {
   const t = (texto || '').trim();
   if (t.length < 2) return false;
-  const yaEsta = db.prepare('SELECT 1 FROM bot_memoria WHERE user_id = ? AND lower(texto) = lower(?)').get(userId, t);
+  const yaEsta = await get('SELECT 1 AS x FROM bot_memoria WHERE user_id = ? AND lower(texto) = lower(?)', [userId, t]);
   if (yaEsta) return false;
-  db.prepare('INSERT INTO bot_memoria (user_id, tipo, texto) VALUES (?, ?, ?)').run(userId, tipo, t);
+  await run('INSERT INTO bot_memoria (user_id, tipo, texto) VALUES (?, ?, ?)', [userId, tipo, t]);
   return true;
 }
 
 function deseosDe(userId) {
-  return db.prepare('SELECT texto, tipo, creado FROM bot_memoria WHERE user_id = ? ORDER BY id DESC').all(userId);
+  return all('SELECT texto, tipo, creado FROM bot_memoria WHERE user_id = ? ORDER BY id DESC', [userId]);
 }
 
 function guardarChat(userId, rol, mensaje) {
-  db.prepare('INSERT INTO bot_chat (user_id, rol, mensaje) VALUES (?, ?, ?)').run(userId, rol, mensaje);
+  return run('INSERT INTO bot_chat (user_id, rol, mensaje) VALUES (?, ?, ?)', [userId, rol, mensaje]);
 }
 
-function historial(userId, limite = 60) {
-  return db.prepare('SELECT rol, mensaje, creado FROM bot_chat WHERE user_id = ? ORDER BY id DESC LIMIT ?')
-    .all(userId, limite).reverse();
+async function historial(userId, limite = 60) {
+  const filas = await all('SELECT rol, mensaje, creado FROM bot_chat WHERE user_id = ? ORDER BY id DESC LIMIT ?',
+    [userId, limite]);
+  return filas.reverse();
 }
 
 // ---------- motor de ideas ----------
@@ -119,8 +120,8 @@ function ideasParaTexto(texto, cantidad = 4) {
   return { cats, ideas: pick(ideas, Math.min(cantidad, ideas.length)) };
 }
 
-function fichaAmigo(amigo) {
-  const deseos = deseosDe(amigo.id).filter(d => d.tipo === 'deseo').map(d => d.texto);
+async function fichaAmigo(amigo) {
+  const deseos = (await deseosDe(amigo.id)).filter(d => d.tipo === 'deseo').map(d => d.texto);
   const lineas = [
     `${amigo.nombre}${amigo.apodo ? ` (alias "${amigo.apodo}")` : ''}`,
     `• Le gusta: ${amigo.gustos}`,
@@ -147,7 +148,7 @@ const RX = {
   ver: /(mi lista|que anote|que guarde|mis deseos|mi wishlist)/
 };
 
-function responder({ user, amigo, texto }) {
+async function responder({ user, amigo, texto }) {
   const t = norm(texto);
   const monto = getConfig('monto');
   const aprendido = [];
@@ -161,7 +162,7 @@ function responder({ user, amigo, texto }) {
       .trim();
     const partes = limpio.split(/\s*(?:,|;|\by\b|\bo\b|\/)\s*/).map(s => s.trim()).filter(s => s.length > 2);
     for (const p of (partes.length ? partes : [limpio])) {
-      if (guardarDeseo(user.id, p)) aprendido.push(p);
+      if (await guardarDeseo(user.id, p)) aprendido.push(p);
     }
     const { ideas } = ideasParaTexto(limpio, 3);
     reply = aprendido.length
@@ -175,13 +176,13 @@ function responder({ user, amigo, texto }) {
       reply = `Todavía no puedo decirte nada de tu amigo secreto 🤫\nEl sorteo se realiza automáticamente cuando los ${getConfig('max_participantes')} participantes estén registrados. Mientras tanto, cuéntame qué te gustaría recibir a ti y lo guardo en tu lista.`;
     } else {
       const { ideas, cats } = ideasParaTexto(perfilTexto(amigo), 5);
-      reply = `Tu amigo secreto es ${amigo.nombre} 🤐 Esto es lo que sé de ${amigo.nombre.split(' ')[0]}:\n\n${fichaAmigo(amigo)}\n\n🎁 Ideas que le encantarían${cats.length ? ` (perfil: ${cats.map(c => c.cat).join(', ')})` : ''}:\n${ideas.map(i => `• ${i}`).join('\n')}\n\n💰 Recuerda el monto acordado: ${monto}.\n¿Quieres más ideas de alguna categoría en particular?`;
+      reply = `Tu amigo secreto es ${amigo.nombre} 🤐 Esto es lo que sé de ${amigo.nombre.split(' ')[0]}:\n\n${await fichaAmigo(amigo)}\n\n🎁 Ideas que le encantarían${cats.length ? ` (perfil: ${cats.map(c => c.cat).join(', ')})` : ''}:\n${ideas.map(i => `• ${i}`).join('\n')}\n\n💰 Recuerda el monto acordado: ${monto}.\n¿Quieres más ideas de alguna categoría en particular?`;
     }
   }
 
   // --- ver su propia lista ---
   else if (RX.ver.test(t)) {
-    const mios = deseosDe(user.id);
+    const mios = await deseosDe(user.id);
     reply = mios.length
       ? `Esta es tu lista de deseos 📜 (solo la ve quien te sacó en el sorteo):\n${mios.map(d => `• ${d.texto}`).join('\n')}`
       : `Tu lista está vacía 🫙 Cuéntame: "quiero unos audífonos bluetooth" y la empiezo a llenar.`;
@@ -219,8 +220,8 @@ function responder({ user, amigo, texto }) {
     }
   }
 
-  guardarChat(user.id, 'user', texto);
-  guardarChat(user.id, 'bot', reply);
+  await guardarChat(user.id, 'user', texto);
+  await guardarChat(user.id, 'bot', reply);
   return { reply, aprendido };
 }
 
