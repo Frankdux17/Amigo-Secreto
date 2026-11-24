@@ -132,8 +132,12 @@
       cam.style.transition = `transform ${dur}ms linear`;
       cam.style.transform = `translateX(${ancho + 320}px)`;
 
-      setTimeout(() => globo.classList.add('ver'), 1200);
-      setTimeout(() => globo.classList.remove('ver'), dur * 0.62);
+      // El personaje arranca fuera de la pantalla (left:-220px). Si el globo se
+      // mostraba al segundo, aparecia a medias por el borde izquierdo. Se
+      // muestra cuando ya entro del todo y se oculta antes de salir por la
+      // derecha, de modo que el mensaje siempre se lee completo.
+      setTimeout(() => globo.classList.add('ver'), dur * 0.22);
+      setTimeout(() => globo.classList.remove('ver'), dur * 0.66);
       setTimeout(vuelta, dur + 2600);
     }
     setTimeout(vuelta, 1400);

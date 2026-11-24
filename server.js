@@ -11,6 +11,7 @@ const { all, get, run, init, DB_FILE, USA_TURSO, getConfig, setConfig, allConfig
 const SqliteStore = require('./src/session-store');
 const sorteo = require('./src/sorteo');
 const bot = require('./src/bot');
+const knn = require('./src/knn');
 
 const app = express();
 const PORT = process.env.PORT || 3600;
@@ -414,13 +415,21 @@ app.get('/api/estado', pedirLogin, A(async (req, res) => {
         .filter((v, i, arr) => arr.indexOf(v) === i)
     };
   }
+  // Recados que otros amigos le dejaron (el duende los entrega al entrar)
+  const recados = (await bot.recadosDe(yo.id)).map(x => ({
+    id: Number(x.id),
+    texto: x.texto,
+    de: x.anonimo ? 'Alguien del grupo' : (x.de_apodo || String(x.de_nombre).split(' ')[0])
+  }));
+
   res.json({
     yo: { id: Number(yo.id), nombre: yo.nombre, apodo: yo.apodo, rol: yo.rol },
     cupo: c,
     sorteoHecho: sorteo.sorteoHecho(),
     visto: a ? !!a.visto : false,
     evento: { monto: getConfig('monto'), fecha: getConfig('fecha_evento'), lugar: getConfig('lugar') },
-    amigo
+    amigo,
+    recados
   });
 }));
 
@@ -431,8 +440,69 @@ app.post('/api/bot', pedirLogin, A(async (req, res) => {
   if (texto.length > 500) return res.status(400).json({ error: 'Mensaje demasiado largo.' });
   const asignado = await sorteo.asignacionDe(yo.id);
   const amigo = asignado ? await Q.porId(asignado.id) : null;
-  const r = await bot.responder({ user: yo, amigo, texto });
-  res.json({ ok: true, reply: r.reply, aprendido: r.aprendido, deseos: await bot.deseosDe(yo.id) });
+  const c = await cupo();
+  const r = await bot.responder({
+    user: yo,
+    amigo,
+    texto,
+    ctx: {
+      sorteoHecho: sorteo.sorteoHecho(),
+      total: c.total, max: c.max,
+      monto: getConfig('monto'), fecha: getConfig('fecha_evento'), lugar: getConfig('lugar')
+    },
+    // el duende puede dejar algo "a medias" (un recado, un juego): el cliente
+    // nos lo devuelve en el siguiente turno para retomar la conversación
+    espera: req.body.espera && typeof req.body.espera === 'object' ? req.body.espera : null
+  });
+  res.json({
+    ok: true,
+    reply: r.texto,
+    sugerencias: r.sugerencias || null,
+    espera: r.espera || null,
+    animacion: r.animacion || null,
+    ideas: r.ideas || null,
+    deseos: await bot.deseosDe(yo.id)
+  });
+}));
+
+
+// Marca un recado como entregado (lo llama el duende cuando ya lo contó).
+app.post('/api/recado/:id/visto', pedirLogin, A(async (req, res) => {
+  await bot.marcarRecadoEntregado(Number(req.params.id), req.yo.id);
+  res.json({ ok: true });
+}));
+
+// Deja un recado para otro participante.
+app.post('/api/recado', pedirLogin, A(async (req, res) => {
+  const paraId = Number(req.body.para);
+  const texto = limpiar(req.body.texto);
+  const destino = await get('SELECT id FROM usuarios WHERE id = ? AND activo = 1', [paraId]);
+  if (!destino) return res.status(400).json({ error: 'Ese amigo no existe.' });
+  const r = await bot.dejarRecado({ deId: req.yo.id, paraId, texto, anonimo: req.body.anonimo ? 1 : 0 });
+  if (!r.ok) {
+    return res.status(400).json({
+      error: r.motivo === 'revela'
+        ? 'Ese mensaje revelaría el sorteo 🤐 El duende no lo puede llevar.'
+        : 'No se pudo enviar el recado.'
+    });
+  }
+  res.json({ ok: true });
+}));
+
+// Feedback sobre una idea: asi el duende aprende que le sirve a cada quien.
+app.post('/api/idea/feedback', pedirLogin, A(async (req, res) => {
+  const idea = limpiar(req.body.idea);
+  if (!idea) return res.status(400).json({ error: 'Falta la idea.' });
+  // la calificacion se guarda sobre el usuario que la recibiria, no sobre
+  // quien la califica: lo que aprendemos es el gusto del destinatario
+  const paraId = Number(req.body.para) || req.yo.id;
+  if (paraId !== req.yo.id) {
+    // solo se permite calificar ideas para el amigo que a uno le toco
+    const a = await sorteo.asignacionDe(req.yo.id);
+    if (!a || Number(a.id) !== paraId) return res.status(403).json({ error: 'No autorizado.' });
+  }
+  await knn.calificarIdea(paraId, idea, !!req.body.gusta);
+  res.json({ ok: true });
 }));
 
 // ------------------------------------------------------------
@@ -577,6 +647,10 @@ app.post('/admin/usuario/nuevo', pedirLogin, pedirAdmin, A(async (req, res) => {
 }));
 
 // ------------------------------------------------------------
+app.get('/api/aprendizaje', pedirLogin, A(async (req, res) => {
+  res.json({ ok: true, ...(await knn.estadisticas()) });
+}));
+
 app.get('/salud', A(async (req, res) => {
   res.json({ ok: true, almacenamiento: USA_TURSO ? 'turso' : 'archivo local', db: DB_FILE, ...(await cupo()), sorteo: sorteo.sorteoHecho() });
 }));

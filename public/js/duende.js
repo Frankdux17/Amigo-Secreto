@@ -361,38 +361,73 @@
   }
 
   // -------------------------------------------------- panel de chat
+  // ==========================================================
+  //  CONVERSACIÓN
+  // ==========================================================
+  let esperaActual = null;   // lo que el duende dejó pendiente (juego, recado…)
+
   function burbuja(rol, texto, esHtml) {
     const d = document.createElement('div');
     d.className = 'msj ' + rol;
-    if (esHtml) d.innerHTML = texto; else d.textContent = texto;
+    // el duende responde con HTML sencillo (<b>, <br>) que el servidor arma
+    if (esHtml === false) d.textContent = texto; else d.innerHTML = texto;
     if (rol.indexOf('bot') === 0 && rol.indexOf('escribiendo') < 0) hablar(texto);
     msjs.appendChild(d);
     msjs.scrollTop = msjs.scrollHeight;
     return d;
   }
 
-  function chips() {
-    const lista = estado && estado.amigo
-      ? [['🎁 ¿Qué le regalo?', '¿Qué le regalo a mi amigo secreto?'],
-         ['👀 ¿Qué le gusta?', '¿Qué le gusta a mi amigo secreto?'],
-         ['✍️ Quiero pedir algo', 'quiero '],
-         ['📜 Mi lista', 'mi lista'],
-         ['💰 El monto', '¿cuánto es el monto?']]
-      : [['✍️ Quiero pedir algo', 'quiero '],
-         ['📜 Mi lista', 'mi lista'],
-         ['❓ Cómo funciona', '¿cómo funciona el sorteo?'],
-         ['💰 El monto', '¿cuánto es el monto?'],
-         ['🗓️ ¿Cuándo es?', '¿cuándo es el intercambio?']];
+  /** Botones 👍/👎 bajo una tanda de ideas: así el duende aprende qué sirve. */
+  function botonesIdea(ideas) {
+    if (!ideas || !ideas.length || !estado || !estado.amigo) return;
+    const caja = document.createElement('div');
+    caja.className = 'idea-feedback';
+    caja.innerHTML = '<span>¿Te sirven estas ideas?</span>';
+    [['👍', true], ['👎', false]].forEach(([icono, gusta]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = icono;
+      b.addEventListener('click', async () => {
+        caja.innerHTML = gusta ? '<span>¡Gracias! Lo tengo en cuenta 🎄</span>' : '<span>Anotado, busco otro estilo 🔄</span>';
+        for (const idea of ideas) {
+          try {
+            await fetch('/api/idea/feedback', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-csrf-token': window.CSRF },
+              body: JSON.stringify({ idea: idea, para: estado.amigo.id, gusta: gusta, _csrf: window.CSRF })
+            });
+          } catch (e) { /* sin conexión: se pierde el voto, no pasa nada */ }
+        }
+        if (!gusta) setTimeout(() => enviar('otra idea'), 600);
+      });
+      caja.appendChild(b);
+    });
+    msjs.appendChild(caja);
+    msjs.scrollTop = msjs.scrollHeight;
+  }
+
+  /** Chips de sugerencia. El servidor manda las suyas según la conversación. */
+  function chips(lista) {
+    const porDefecto = estado && estado.amigo
+      ? ['🎁 Dame ideas', '👀 ¿Qué le gusta?', '🧮 ¿Con quién me parezco?', '🎲 Juguemos algo', '💰 El monto']
+      : ['👥 ¿Quiénes están?', '✍️ Quiero pedir algo', '🧮 ¿Con quién me parezco?', '🎲 Juguemos algo', '❓ Cómo funciona'];
+    const usar = (lista && lista.length) ? lista : porDefecto;
 
     sugerencias.innerHTML = '';
-    lista.forEach(([etiqueta, texto]) => {
+    usar.forEach(etiqueta => {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'chip';
       b.textContent = etiqueta;
       b.addEventListener('click', () => {
-        if (texto.trim().endsWith('quiero')) { input.value = 'quiero '; input.focus(); return; }
-        enviar(texto);
+        // el texto que se envía es la etiqueta sin el emoji inicial
+        const limpio = etiqueta.replace(/^[^\w¿¡]+/, '').trim();
+        if (/^(quiero pedir algo|dile a .*)$/i.test(limpio)) {
+          input.value = limpio.toLowerCase().indexOf('dile') === 0 ? limpio.replace(/…$/, ' ') : 'quiero ';
+          input.focus();
+          return;
+        }
+        enviar(limpio);
       });
       sugerencias.appendChild(b);
     });
@@ -402,39 +437,65 @@
     if (saludado) return;
     saludado = true;
     const yo = estado ? nombreCorto(estado.yo) : '';
-    burbuja('bot', `¡Hola${yo ? ', ' + yo : ''}! 🧝 Soy el Duende Ayudante.`);
+    burbuja('bot', `¡Hola${yo ? ', ' + escapar(yo) : ''}! 🧝 Soy el Duende Ayudante.`);
+
     if (estado && estado.amigo) {
       const n = nombreCorto(estado.amigo);
       let t = `Tu amigo secreto es <b>${escapar(estado.amigo.nombre)}</b> 🤫`;
-      if (estado.amigo.gustos) t += `\nA ${escapar(n)} le gusta: <b>${escapar(estado.amigo.gustos)}</b>.`;
+      if (estado.amigo.gustos) t += `<br>A ${escapar(n)} le gusta: <b>${escapar(estado.amigo.gustos)}</b>.`;
       if (estado.amigo.deseos && estado.amigo.deseos.length) {
-        t += `\n\nSu lista de deseos:\n${estado.amigo.deseos.map(d => '• ' + escapar(d)).join('\n')}`;
+        t += `<br><br>Su lista de deseos:<br>${estado.amigo.deseos.map(d => '• ' + escapar(d)).join('<br>')}`;
       }
-      t += '\n\nPídeme ideas cuando quieras 🎁';
-      burbuja('bot', t, true);
+      t += '<br><br>Pídeme ideas cuando quieras 🎁';
+      burbuja('bot', t);
     } else if (estado && !estado.sorteoHecho) {
-      burbuja('bot', `Todavía no hay sorteo: faltan ${estado.cupo.faltan} amigo(s). Mientras tanto cuéntame qué te gustaría recibir y lo anoto en tu lista.`);
+      burbuja('bot', `Todavía no hay sorteo: faltan <b>${estado.cupo.faltan}</b> amigo(s) 🎲<br>` +
+        `Mientras esperamos puedo contarte del grupo, llevarle un recado a alguien o jugar contigo. ` +
+        `Y si me cuentas qué te gusta, lo anoto para quien te saque.`);
     }
+    entregarRecados();
     chips();
+  }
+
+  /** El duende entrega los recados que otros le dejaron a este usuario. */
+  function entregarRecados() {
+    if (!estado || !estado.recados || !estado.recados.length) return;
+    estado.recados.forEach((rec, i) => {
+      setTimeout(() => {
+        burbuja('bot', `💌 <b>${escapar(rec.de)}</b> me pidió que te dijera:<br>«${escapar(rec.texto)}»`);
+        if (window.confetiNavidad) window.confetiNavidad(30);
+        fetch('/api/recado/' + rec.id + '/visto', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-csrf-token': window.CSRF },
+          body: JSON.stringify({ _csrf: window.CSRF })
+        }).catch(() => {});
+      }, 1200 + i * 2600);
+    });
+    estado.recados = [];
   }
 
   async function enviar(texto) {
     if (!texto || !texto.trim()) return;
-    burbuja('user', texto);
+    burbuja('user', texto, false);
     input.value = '';
     btnEnviar.disabled = true;
-    const esperando = burbuja('bot escribiendo', 'El duende está pensando…');
+    const esperando = burbuja('bot escribiendo', 'El duende está pensando…', false);
+    const enviandoEspera = esperaActual;
+    esperaActual = null;
     try {
       const r = await fetch('/api/bot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-csrf-token': window.CSRF, accept: 'application/json' },
-        body: JSON.stringify({ texto: texto, _csrf: window.CSRF })
+        body: JSON.stringify({ texto: texto, espera: enviandoEspera, _csrf: window.CSRF })
       });
       const d = await r.json();
       esperando.remove();
-      if (d.error) { burbuja('bot', '⚠️ ' + d.error); return; }
+      if (d.error) { burbuja('bot', '⚠️ ' + escapar(d.error)); return; }
       burbuja('bot', d.reply);
-      if (d.aprendido && d.aprendido.length && window.confetiNavidad) window.confetiNavidad(50);
+      if (d.espera) esperaActual = d.espera;
+      if (d.animacion === 'cosquillas') reir();
+      if (d.ideas) botonesIdea(d.ideas);
+      chips(d.sugerencias);
     } catch (e) {
       esperando.remove();
       burbuja('bot', '⚠️ No pude responder. Revisa tu conexión.');
@@ -444,7 +505,132 @@
     }
   }
 
+  // ==========================================================
+  //  HABLARLE AL DUENDE (reconocimiento de voz)
+  // ==========================================================
+  const Reconocimiento = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  let oyendo = false;
+  let reconocedor = null;
+  const btnMic = $('#duende-mic');
+
+  function prepararMicrofono() {
+    if (!btnMic) return;
+    if (!Reconocimiento) { btnMic.style.display = 'none'; return; }
+
+    reconocedor = new Reconocimiento();
+    reconocedor.lang = 'es-PE';
+    reconocedor.interimResults = true;
+    reconocedor.continuous = false;
+    reconocedor.maxAlternatives = 1;
+
+    reconocedor.onstart = () => { oyendo = true; btnMic.classList.add('oyendo'); input.placeholder = 'Te escucho…'; };
+    reconocedor.onresult = (ev) => {
+      let texto = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) texto += ev.results[i][0].transcript;
+      input.value = texto;
+      // si el resultado ya es definitivo, se envía solo
+      if (ev.results[ev.results.length - 1].isFinal && texto.trim()) {
+        setTimeout(() => { if (input.value.trim()) enviar(input.value); }, 350);
+      }
+    };
+    reconocedor.onerror = (ev) => {
+      btnMic.classList.remove('oyendo');
+      oyendo = false;
+      input.placeholder = 'Escribe aquí…';
+      if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+        burbuja('bot', '🎤 No me diste permiso para el micrófono. Puedes activarlo en el candado de la barra de direcciones.');
+      }
+    };
+    reconocedor.onend = () => { oyendo = false; btnMic.classList.remove('oyendo'); input.placeholder = 'Escribe aquí…'; };
+
+    btnMic.addEventListener('click', () => {
+      if (!reconocedor) return;
+      if (oyendo) { try { reconocedor.stop(); } catch (e) {} return; }
+      callar();                       // que no se escuche a sí mismo
+      try { reconocedor.start(); } catch (e) { /* ya estaba activo */ }
+    });
+  }
+
+  // ==========================================================
+  //  COSQUILLAS
+  // ==========================================================
+  let toques = 0;
+  let relojToques = null;
+
+  function reir() {
+    widget.classList.add('riendo');
+    if (window.confetiNavidad) window.confetiNavidad(40);
+    setTimeout(() => widget.classList.remove('riendo'), 2200);
+  }
+
+  function cosquillas() {
+    toques++;
+    clearTimeout(relojToques);
+    relojToques = setTimeout(() => { toques = 0; }, 1400);
+    if (toques >= 3) {
+      toques = 0;
+      reir();
+      desbloquear();
+      hablar(['¡Jajaja, no me hagas cosquillas!', '¡Jijiji, basta, basta!', '¡Ay, me da risa!'][Math.floor(Math.random() * 3)]);
+      if (!panel.classList.contains('abierto')) {
+        decir('¡JAJAJA no las cosquillas! 🤣 Me rindo… pero igual no suelto el secreto 🤐', 4200);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  // ==========================================================
+  //  EL DUENDE SE PASEA POR LA PÁGINA
+  // ==========================================================
+  let paseo = null;
+  const quietoPorPreferencia = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function pasear() {
+    if (quietoPorPreferencia) return;
+    if (panel.classList.contains('abierto')) return;      // no estorbar el chat
+    if (document.hidden) return;
+
+    // el widget está anclado abajo a la derecha: los desplazamientos son
+    // negativos para moverse hacia la izquierda y hacia arriba
+    const maxX = Math.max(0, window.innerWidth - 150);
+    const maxY = Math.max(0, window.innerHeight - 260);
+    const x = -Math.round(Math.random() * maxX);
+    const y = -Math.round(Math.random() * maxY * 0.65);
+    const vuela = Math.random() < 0.4;
+
+    widget.classList.toggle('volando', vuela);
+    widget.classList.add('paseando');
+    widget.style.transform = `translate(${x}px, ${y}px)`;
+
+    // al llegar, a veces comenta algo
+    setTimeout(() => {
+      widget.classList.remove('volando');
+      if (Math.random() < 0.45 && !panel.classList.contains('abierto')) {
+        const frases = avisos();
+        if (frases.length) decir(frases[Math.floor(Math.random() * frases.length)], 6000);
+      }
+    }, 4200);
+  }
+
+  function volverASuSitio() {
+    widget.style.transform = '';
+    widget.classList.remove('volando');
+  }
+
+  function arrancarPaseo() {
+    if (quietoPorPreferencia) return;
+    clearInterval(paseo);
+    paseo = setInterval(() => {
+      if (Math.random() < 0.3) volverASuSitio(); else pasear();
+    }, 21000);
+  }
+
+  // ==========================================================
+  //  APERTURA Y CIERRE
+  // ==========================================================
   function abrir() {
+    volverASuSitio();                 // que no quede a medio camino
     panel.classList.add('abierto');
     globo.classList.remove('ver');
     punto.classList.remove('ver');
@@ -453,11 +639,17 @@
   }
   function cerrar() { panel.classList.remove('abierto'); }
 
-  lanzador.addEventListener('click', () => panel.classList.contains('abierto') ? cerrar() : abrir());
+  lanzador.addEventListener('click', () => {
+    if (cosquillas()) return;         // tres toques seguidos = cosquillas
+    panel.classList.contains('abierto') ? cerrar() : abrir();
+  });
   $('#duende-cerrar').addEventListener('click', cerrar);
   form.addEventListener('submit', (e) => { e.preventDefault(); enviar(input.value); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrar(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) volverASuSitio(); });
+  window.addEventListener('resize', volverASuSitio);
   window.abrirDuende = (texto) => { abrir(); if (texto) setTimeout(() => enviar(texto), 420); };
+  prepararMicrofono();
 
   // -------------------------------------------------- aviso del sorteo
   const sorpresa = $('#sorpresa');
@@ -513,6 +705,13 @@
       } else {
         rotarAvisos();
       }
+      // hay recados esperando: que se note sin tener que abrir el chat
+      if (estado.recados && estado.recados.length) {
+        punto.classList.add('ver');
+        setTimeout(() => decir(
+          `💌 Tienes <b>${estado.recados.length}</b> recado(s) del grupo. ¡Ábreme y te los cuento!`, 9000), 2400);
+      }
+      arrancarPaseo();
     })
     .catch(() => {});
 })();

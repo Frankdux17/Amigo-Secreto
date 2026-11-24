@@ -56,6 +56,32 @@ Un personaje animado en SVG (camina, saluda, parpadea, le suena el pompón) acom
 - **Da ideas de regalo** según el perfil del amigo, y **aprende** lo que el usuario quiere recibir
   («quiero una manta polar» → queda en su lista, visible solo para quien lo sacó).
 - Antes del sorteo recuerda cuántos amigos faltan y anima a completar el perfil.
+- **Aprende de verdad.** El motor está en `src/knn.js` y no usa ninguna librería:
+  cada amigo se convierte en un vector de intereses (categorías del catálogo + palabras
+  sueltas, pesadas según la fuente y normalizadas), se comparan con **similitud del
+  coseno**, se toman los **k vecinos más cercanos** (k=3) y se recomienda por
+  **filtrado colaborativo basado en usuario**:
+  `score(idea) = 2·sim(destino, idea) + Σ sim(destino, vecino)·sim(vecino, idea)`.
+  El primer término evita el arranque en frío; el segundo es el aprendizaje propiamente
+  dicho y pesa más conforme el grupo se llena. Cada sugerencia viene con su porqué.
+- **Se refuerza con el uso.** Todo lo que aprende va a la tabla `senales` con un peso:
+  repetir algo sube el peso (con logaritmo, para que repetir diez veces no valga diez
+  veces más), los 👍/👎 de cada idea ajustan el perfil, y lo que dice un tercero pesa
+  menos que lo que dice el propio interesado.
+- **Entretiene mientras no hay sorteo.** Cuenta del grupo, describe a cada amigo,
+  calcula con quién tienes más en común y propone juegos (adivinar de quién son unos
+  gustos, suponer qué le gusta a alguien). Todo lo que sale jugando se aprende.
+- **Lleva recados.** «dile a Fabio que eres muy social» y el duende se lo entrega
+  cuando Fabio entre. Un recado que intente destripar el sorteo se bloquea.
+- **Se le puede hablar.** Botón 🎤 en el chat (reconocimiento de voz del navegador,
+  es-PE). Si el navegador no lo soporta, el botón no aparece.
+- **Se pasea y tiene cosquillas.** Camina y vuela por la página cada cierto rato (se
+  queda quieto si el chat está abierto, en móvil o si el sistema pide menos
+  movimiento). Tres toques seguidos y se muere de risa.
+- **Nunca revela el sorteo.** No por buena voluntad, sino por construcción: el módulo
+  del duende recibe del servidor **únicamente** la asignación de quien pregunta. Las
+  parejas de los demás no entran nunca en ese código, así que no hay nada que filtrar.
+  A quien insista, lo esquiva con gracia.
 - **Habla.** Tiene voz de duendecito con la síntesis de voz del propio navegador: narra el
   resultado del sorteo, sus avisos y sus respuestas del chat. No usa ningún servicio externo ni
   archivos de audio.

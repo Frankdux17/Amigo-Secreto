@@ -1,0 +1,104 @@
+/* ==========================================================
+   EL DUENDE CON VIDA
+   Paseo por la página, risa de cosquillas, micrófono y feedback.
+   ========================================================== */
+
+/* ---------- paseo ---------- */
+/* El widget está anclado abajo a la derecha; para pasear se le aplica un
+   translate con transición larga, de modo que camine en vez de saltar. */
+.duende-widget.paseando {
+  transition: transform 4.2s cubic-bezier(.45, .05, .35, 1);
+}
+.duende-widget.paseando .d-pierna-i,
+.duende-widget.paseando .d-pierna-d { animation-duration: .32s; }
+
+/* cuando vuela, en vez de caminar, flota y se inclina */
+.duende-widget.volando .duende-lanzador { animation: duende-vuela 1.1s ease-in-out infinite; }
+.duende-widget.volando .d-pierna-i,
+.duende-widget.volando .d-pierna-d { animation-play-state: paused; }
+@keyframes duende-vuela {
+  0%, 100% { transform: translateY(0) rotate(-6deg); }
+  50%      { transform: translateY(-14px) rotate(6deg); }
+}
+/* estelita de polvo mágico mientras vuela */
+.duende-widget.volando .duende-aura {
+  animation: duende-chispas .9s ease-in-out infinite;
+  box-shadow: 0 0 22px 6px rgba(244, 196, 75, .55);
+}
+@keyframes duende-chispas {
+  0%, 100% { opacity: .5; transform: scale(1); }
+  50%      { opacity: 1;  transform: scale(1.18); }
+}
+
+/* ---------- cosquillas ---------- */
+.duende-widget.riendo .duende-lanzador { animation: duende-rie .22s ease-in-out 9; }
+@keyframes duende-rie {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  25%      { transform: translateY(-5px) rotate(-9deg); }
+  75%      { transform: translateY(-3px) rotate(9deg); }
+}
+.duende-widget.riendo .d-cabeza { animation: duende-cabezazo .3s ease-in-out 7; }
+@keyframes duende-cabezazo {
+  0%, 100% { transform: rotate(0); }
+  50%      { transform: rotate(-7deg); }
+}
+/* jajaja que sale flotando */
+.duende-widget.riendo .duende-lanzador::after {
+  content: '😂'; position: absolute; top: -14px; right: -10px; font-size: 1.3rem;
+  animation: duende-jaja 1.1s ease-out 2;
+}
+@keyframes duende-jaja {
+  from { opacity: 0; transform: translateY(0) scale(.6); }
+  40%  { opacity: 1; }
+  to   { opacity: 0; transform: translateY(-34px) scale(1.2); }
+}
+
+/* ---------- micrófono ---------- */
+.duende-mic {
+  flex: none; width: 40px; height: 40px; border-radius: 50%; cursor: pointer;
+  font-size: 1.05rem; line-height: 1; border: 1px solid var(--borde);
+  background: rgba(255, 255, 255, .07); color: var(--texto);
+  transition: background .18s, transform .18s, box-shadow .18s;
+}
+.duende-mic:hover { background: rgba(255, 255, 255, .15); transform: translateY(-1px); }
+.duende-mic.oyendo {
+  background: linear-gradient(135deg, #e0404f, #b3202e); border-color: #ff8c96; color: #fff;
+  animation: mic-late 1s ease-in-out infinite;
+}
+@keyframes mic-late {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(224, 64, 79, .6); }
+  50%      { box-shadow: 0 0 0 9px rgba(224, 64, 79, 0); }
+}
+
+/* ---------- feedback de ideas ---------- */
+.idea-feedback {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 2px 0 6px; padding: 8px 12px; border-radius: 12px;
+  background: rgba(255, 255, 255, .05); border: 1px dashed var(--borde);
+  font-size: .78rem; color: var(--texto-2);
+}
+.idea-feedback button {
+  border: 1px solid var(--borde); background: rgba(255, 255, 255, .08); cursor: pointer;
+  width: 32px; height: 32px; border-radius: 50%; font-size: .95rem; line-height: 1;
+  transition: transform .15s, background .15s;
+}
+.idea-feedback button:hover { transform: scale(1.18); background: rgba(255, 255, 255, .18); }
+
+/* el "porqué" de cada recomendación, en gris y más pequeño */
+.msj .porque { color: #93a2c4; font-size: .76rem; font-style: italic; }
+
+/* ---------- respeto por quien prefiere menos movimiento ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .duende-widget.paseando { transition: none; transform: none !important; }
+  .duende-widget.volando .duende-lanzador,
+  .duende-widget.riendo .duende-lanzador,
+  .duende-widget.riendo .d-cabeza { animation: none; }
+  .duende-widget.riendo .duende-lanzador::after { content: none; }
+  .duende-mic.oyendo { animation: none; }
+}
+
+/* ---------- en pantallas chicas el duende no se pasea ---------- */
+@media (max-width: 640px) {
+  .duende-widget.paseando { transform: none !important; }
+  .duende-mic { width: 36px; height: 36px; }
+}

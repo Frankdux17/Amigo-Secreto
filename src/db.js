@@ -117,6 +117,32 @@ CREATE TABLE IF NOT EXISTS sesiones (
   expira  INTEGER NOT NULL,
   data    TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS senales (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  usuario_id  INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  tipo        TEXT    NOT NULL DEFAULT 'gusta',
+  valor       TEXT    NOT NULL,
+  peso        REAL    NOT NULL DEFAULT 1,
+  origen      TEXT    NOT NULL DEFAULT 'chat',
+  autor_id    INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  creado      TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_senales_usuario ON senales (usuario_id);
+
+CREATE TABLE IF NOT EXISTS recados (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  de_id       INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  para_id     INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  texto       TEXT    NOT NULL,
+  anonimo     INTEGER NOT NULL DEFAULT 0,
+  estado      TEXT    NOT NULL DEFAULT 'pendiente',
+  respuesta   TEXT,
+  creado      TEXT    NOT NULL DEFAULT (datetime('now')),
+  entregado   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_recados_para ON recados (para_id, estado);
+
 `;
 
 // ---------- configuración (en memoria, se lee muchas veces) ----------
@@ -158,8 +184,45 @@ async function setConfig(clave, valor) {
 }
 
 // ---------- arranque ----------
+
+/**
+ * CREATE TABLE IF NOT EXISTS crea tablas nuevas, pero no agrega columnas a una
+ * tabla que ya existe. Esto compara lo que hay con lo que debería haber y
+ * agrega lo que falte, para que un despliegue sobre datos viejos no se rompa.
+ */
+const COLUMNAS_ESPERADAS = {
+  usuarios: {
+    apodo: 'TEXT', cumple: 'TEXT', no_gustos: 'TEXT', direccion: 'TEXT', foto: 'TEXT',
+    rol: "TEXT NOT NULL DEFAULT 'participante'", activo: 'INTEGER NOT NULL DEFAULT 1'
+  },
+  sorteo: { visto: 'INTEGER NOT NULL DEFAULT 0' },
+  senales: { autor_id: 'INTEGER', origen: "TEXT NOT NULL DEFAULT 'chat'", peso: 'REAL NOT NULL DEFAULT 1' },
+  recados: { anonimo: 'INTEGER NOT NULL DEFAULT 0', respuesta: 'TEXT', entregado: 'TEXT' }
+};
+
+async function migrarColumnas() {
+  const agregadas = [];
+  for (const [tabla, columnas] of Object.entries(COLUMNAS_ESPERADAS)) {
+    let actuales;
+    try { actuales = await all(`PRAGMA table_info(${tabla})`); }
+    catch (e) { continue; }                       // la tabla aún no existe
+    if (!actuales || !actuales.length) continue;
+    const hay = new Set(actuales.map(c => c.name));
+    for (const [col, tipo] of Object.entries(columnas)) {
+      if (hay.has(col)) continue;
+      try {
+        await cliente.execute(`ALTER TABLE ${tabla} ADD COLUMN ${col} ${tipo}`);
+        agregadas.push(`${tabla}.${col}`);
+      } catch (e) { /* ya existía o no se puede: se ignora */ }
+    }
+  }
+  if (agregadas.length) console.log('Columnas agregadas:', agregadas.join(', '));
+  return agregadas;
+}
+
 async function init() {
   await cliente.executeMultiple(ESQUEMA);
+  await migrarColumnas();
 
   for (const [k, v] of Object.entries(DEFAULTS)) {
     const existe = await get('SELECT 1 AS x FROM config WHERE clave = ?', [k]);
@@ -198,7 +261,7 @@ async function init() {
 }
 
 module.exports = {
-  cliente, init, all, get, run, batch,
+  cliente, init, all, get, run, batch, migrarColumnas,
   getConfig, setConfig, allConfig, cargarConfig,
   DB_FILE, DB_DIR, USA_TURSO, DEFAULTS
 };

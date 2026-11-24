@@ -1,228 +1,446 @@
 'use strict';
+/**
+ * ============================================================================
+ *  EL DUENDE AYUDANTE
+ * ============================================================================
+ *
+ *  Un asistente que conversa, aprende y hace de mensajero entre los amigos.
+ *  Apoyado en src/knn.js para la parte de aprendizaje (k-NN + filtrado
+ *  colaborativo) y en unas cuantas reglas para entender la intención.
+ *
+ *  REGLA DE ORO, POR ENCIMA DE TODO LO DEMÁS
+ *  -----------------------------------------
+ *  El duende JAMÁS revela a quién le tocó quién. Ni el del que pregunta a
+ *  otro, ni el de un tercero, ni por aproximación ("¿le tocó alguien de
+ *  Lima?"), ni jugando, ni aunque se lo pidan de mil formas.
+ *
+ *  Esto no se confía a que el modelo "se porte bien": está garantizado por
+ *  construcción. El duende recibe del servidor ÚNICAMENTE la asignación de
+ *  quien está preguntando (el parámetro `amigo`). Las parejas de los demás
+ *  no entran nunca en este módulo, así que no hay nada que se pueda filtrar
+ *  aunque una respuesta saliera mal redactada. Y, por si acaso, los recados
+ *  que un amigo manda a otro se revisan antes de entregarse: si alguien
+ *  intenta usar al duende para contar a quién le tocó, el recado se bloquea.
+ * ============================================================================
+ */
 
-// ============================================================
-//  DUENDE BOT - asistente de ideas de regalo (100% local, sin APIs)
-//  Se "alimenta" de lo que responde cada usuario: todo lo que el
-//  usuario dice que quiere se guarda en bot_memoria y luego su
-//  amigo secreto lo puede consultar.
-// ============================================================
+const { all, get, run } = require('./db');
+const knn = require('./knn');
 
-const { all, get, run, getConfig } = require('./db');
+const sinTildes = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
+const norm = (s) => sinTildes(s).toLowerCase().trim();
+const corto = (u) => u ? (u.apodo || String(u.nombre).split(' ')[0]) : 'alguien';
+const alAzar = (a) => a[Math.floor(Math.random() * a.length)];
 
-const norm = (s) => (s || '')
-  .toLowerCase()
-  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  .replace(/\s+/g, ' ')
-  .trim();
-
-// ---------- catálogo de ideas por intereses ----------
-const CATALOGO = [
-  { cat: 'Tecnología', claves: ['tecnolog', 'celular', 'computador', 'laptop', 'pc', 'gadget', 'audifono', 'auricular', 'bluetooth', 'usb', 'cargador', 'smart', 'reloj inteligente', 'smartwatch', 'tablet'],
-    ideas: ['Audífonos bluetooth con estuche de carga', 'Power bank de 10 000 mAh', 'Aro de luz LED para videollamadas', 'Mouse inalámbrico silencioso', 'Soporte de celular para auto o escritorio', 'Smartwatch económico con medidor de pasos', 'Hub USB-C multipuerto', 'Parlante bluetooth resistente al agua'] },
-  { cat: 'Gamer', claves: ['gamer', 'videojuego', 'juego', 'play', 'ps4', 'ps5', 'xbox', 'nintendo', 'steam', 'free fire', 'fortnite', 'valorant', 'lol', 'dota', 'teclado mecanico', 'mando'],
-    ideas: ['Tarjeta de regalo de Steam / PlayStation Store', 'Mousepad XL gamer', 'Teclado mecánico compacto', 'Grip o cubre-análogos para mando', 'Luces LED RGB para el escritorio', 'Taza térmica con diseño gamer', 'Soporte para audífonos'] },
-  { cat: 'Lectura', claves: ['leer', 'lectura', 'libro', 'novela', 'manga', 'comic', 'poesia', 'escrib'],
-    ideas: ['Libro del autor favorito (firmado si se puede)', 'Lámpara de lectura con clip', 'Separadores de libros magnéticos', 'Cuaderno de tapa dura + lapicero bonito', 'Funda o atril para libros', 'Suscripción de 3 meses a audiolibros'] },
-  { cat: 'Deporte', claves: ['deporte', 'gym', 'gimnasio', 'correr', 'running', 'futbol', 'basquet', 'volley', 'natacion', 'bici', 'ciclismo', 'pesas', 'crossfit', 'yoga', 'trotar'],
-    ideas: ['Botella térmica deportiva', 'Banda elástica de resistencia + guía', 'Toalla de microfibra para gym', 'Mochila deportiva compacta', 'Medias o guantes técnicos', 'Tapete de yoga antideslizante', 'Camiseta del equipo favorito'] },
-  { cat: 'Cocina', claves: ['cocin', 'comida', 'chef', 'reposter', 'postre', 'hornear', 'pasteler', 'parrilla', 'comer', 'gastronom'],
-    ideas: ['Set de especias gourmet', 'Delantal bordado con su nombre', 'Tabla de picar de bambú', 'Molde de silicona para repostería', 'Termómetro digital de cocina', 'Libro de recetas peruanas', 'Set de utensilios de silicona'] },
-  { cat: 'Café y té', claves: ['cafe', 'te ', 'cafeter', 'barista', 'infusion', 'mate', 'capuchino'],
-    ideas: ['Prensa francesa pequeña', 'Taza térmica de acero', 'Set de café de origen peruano', 'Espumador de leche portátil', 'Tetera de vidrio con infusor', 'Caja de infusiones surtidas'] },
-  { cat: 'Belleza y cuidado', claves: ['belleza', 'maquillaje', 'skincare', 'cuidado de la piel', 'perfume', 'crema', 'labial', 'unas', 'cabello', 'pelo', 'spa'],
-    ideas: ['Set de skincare (limpiador + hidratante)', 'Perfume o body mist', 'Kit de brochas de maquillaje', 'Secadora o rizador compacto', 'Canasta spa: velas + sales + mascarillas', 'Organizador de cosméticos'] },
-  { cat: 'Moda y accesorios', claves: ['ropa', 'moda', 'zapat', 'zapatilla', 'polo', 'casaca', 'chompa', 'gorra', 'cartera', 'billetera', 'lentes', 'joya', 'aretes', 'collar', 'pulsera', 'reloj'],
-    ideas: ['Billetera o cartera de cuero', 'Chalina / gorro de invierno', 'Gorra bordada', 'Lentes de sol', 'Pulsera o collar con inicial', 'Medias divertidas (pack navideño)', 'Polo personalizado con una broma interna'] },
-  { cat: 'Música', claves: ['music', 'cantar', 'guitarra', 'piano', 'cajon', 'ukelele', 'bateria', 'spotify', 'vinilo', 'concierto'],
-    ideas: ['Suscripción de 3 meses a Spotify', 'Parlante bluetooth portátil', 'Afinador clip para guitarra', 'Cuadro de disco de vinilo decorativo', 'Audífonos con cancelación de ruido', 'Capo o set de cuerdas'] },
-  { cat: 'Arte y manualidades', claves: ['arte', 'pintar', 'dibuj', 'manualidad', 'tejer', 'crochet', 'croche', 'bordar', 'foto', 'fotografia', 'disenar', 'diseno'],
-    ideas: ['Set de lápices de colores profesionales', 'Cuaderno de bocetos A4', 'Kit de acuarelas + pinceles', 'Marco digital o álbum de fotos impreso', 'Set de hilos y agujas premium', 'Tableta de dibujo básica'] },
-  { cat: 'Hogar y decoración', claves: ['hogar', 'casa', 'decor', 'vela', 'planta', 'jardin', 'cactus', 'suculenta', 'manta', 'cojin', 'almohada', 'dormir'],
-    ideas: ['Manta polar suave', 'Difusor de aromas + esencias', 'Suculenta o cactus en maceta pintada', 'Cuadro o lámina enmarcada', 'Juego de velas aromáticas', 'Almohada cervical de viaje'] },
-  { cat: 'Mascotas', claves: ['perro', 'gato', 'mascota', 'michi', 'firulais', 'cachorro', 'hamster'],
-    ideas: ['Kit de juguetes para mascota', 'Collar personalizado con placa', 'Cama o manta para mascota', 'Snacks premium para perro/gato', 'Cepillo quita-pelos', 'Marco con la foto de su mascota'] },
-  { cat: 'Viajes y aventura', claves: ['viaj', 'playa', 'camping', 'montana', 'mochiler', 'trekking', 'aventura', 'carro', 'auto', 'moto'],
-    ideas: ['Organizadores de maleta (packing cubes)', 'Candado TSA + etiqueta de equipaje', 'Termo de viaje', 'Linterna o lámpara de camping', 'Almohada de cuello + antifaz', 'Riñonera o canguro práctico'] },
-  { cat: 'Oficina y estudio', claves: ['oficina', 'estudi', 'universidad', 'trabajo', 'escritorio', 'agenda', 'organiz', 'contab', 'ingenier'],
-    ideas: ['Agenda 2027 con planificador', 'Set de lapiceros de gel + resaltadores', 'Organizador de escritorio de madera', 'Soporte ergonómico para laptop', 'Taza con frase motivadora', 'Pizarra pequeña con imanes'] },
-  { cat: 'Dulces y antojos', claves: ['dulce', 'chocolate', 'golosina', 'snack', 'torta', 'helado', 'paneton', 'vino', 'cerveza', 'pisco', 'trago'],
-    ideas: ['Canasta navideña: panetón + chocolate + vino', 'Caja de bombones artesanales', 'Set de cerveza artesanal peruana', 'Chocolates importados surtidos', 'Kit para preparar cócteles', 'Tabla de quesos y piqueos'] }
-];
-
-const COMODIN = [
-  'Una canasta navideña armada por ti (panetón, chocolate, algo personal)',
-  'Un álbum o marco con fotos del grupo',
-  'Taza personalizada con una foto o broma interna',
-  'Manta polar + chocolate caliente: nunca falla',
-  'Tarjeta de regalo de una tienda que sí usa',
-  'Set de velas aromáticas y difusor',
-  'Audífonos bluetooth: útiles para cualquiera',
-  'Planta pequeña en maceta pintada a mano'
-];
-
-const SALUDOS = [
-  'Hola! Soy el Duende Ayudante 🧝 ¿Te ayudo a encontrar el mejor regalo para tu amigo secreto?',
-  'Ho ho ho! 🎅 Dime los gustos de tu amigo y te doy ideas al instante.',
-  'Llegué del Polo Norte con la lista de ideas ❄️ ¿Qué te cuento?'
-];
-
-function pick(arr, n = 1) {
-  const a = arr.slice();
-  const out = [];
-  while (out.length < n && a.length) out.push(a.splice(Math.floor(Math.random() * a.length), 1)[0]);
-  return out;
-}
-
-// ---------- memoria (wishlist que alimenta el usuario) ----------
-async function guardarDeseo(userId, texto, tipo = 'deseo') {
-  const t = (texto || '').trim();
-  if (t.length < 2) return false;
-  const yaEsta = await get('SELECT 1 AS x FROM bot_memoria WHERE user_id = ? AND lower(texto) = lower(?)', [userId, t]);
-  if (yaEsta) return false;
-  await run('INSERT INTO bot_memoria (user_id, tipo, texto) VALUES (?, ?, ?)', [userId, tipo, t]);
-  return true;
-}
-
-function deseosDe(userId) {
-  return all('SELECT texto, tipo, creado FROM bot_memoria WHERE user_id = ? ORDER BY id DESC', [userId]);
-}
-
-function guardarChat(userId, rol, mensaje) {
-  return run('INSERT INTO bot_chat (user_id, rol, mensaje) VALUES (?, ?, ?)', [userId, rol, mensaje]);
-}
-
-async function historial(userId, limite = 60) {
-  const filas = await all('SELECT rol, mensaje, creado FROM bot_chat WHERE user_id = ? ORDER BY id DESC LIMIT ?',
-    [userId, limite]);
-  return filas.reverse();
-}
-
-// ---------- motor de ideas ----------
-function perfilTexto(u) {
-  if (!u) return '';
-  return norm([u.gustos, u.hobbies, u.deseo1, u.deseo2, u.deseo3, u.color_favorito].join(' '));
-}
-
-function categoriasDe(texto) {
-  const t = norm(texto);
-  const encontradas = [];
-  for (const c of CATALOGO) {
-    if (c.claves.some(k => t.includes(k))) encontradas.push(c);
-  }
-  return encontradas;
-}
-
-function ideasParaTexto(texto, cantidad = 4) {
-  const cats = categoriasDe(texto);
-  if (!cats.length) return { cats: [], ideas: pick(COMODIN, cantidad) };
-  let ideas = [];
-  for (const c of cats) ideas = ideas.concat(pick(c.ideas, 3).map(i => `${i} (${c.cat})`));
-  return { cats, ideas: pick(ideas, Math.min(cantidad, ideas.length)) };
-}
-
-async function fichaAmigo(amigo) {
-  const deseos = (await deseosDe(amigo.id)).filter(d => d.tipo === 'deseo').map(d => d.texto);
-  const lineas = [
-    `${amigo.nombre}${amigo.apodo ? ` (alias "${amigo.apodo}")` : ''}`,
-    `• Le gusta: ${amigo.gustos}`,
-    `• Hobbies: ${amigo.hobbies}`,
-    `• Color favorito: ${amigo.color_favorito}`,
-    `• Talla de ropa: ${amigo.talla_ropa} · Zapato: ${amigo.talla_zapato}`,
-    `• Su lista de deseos: ${[amigo.deseo1, amigo.deseo2, amigo.deseo3].filter(Boolean).join(' / ')}`
-  ];
-  if (amigo.no_gustos) lineas.push(`• ⚠️ NO le gusta: ${amigo.no_gustos}`);
-  if (deseos.length) lineas.push(`• Lo que le contó al duende: ${deseos.slice(0, 6).join(' / ')}`);
-  return lineas.join('\n');
-}
-
-// ---------- intenciones ----------
+// --------------------------------------------------------------------------
+// Intenciones. Primero las más específicas: el orden del dispatcher importa.
+// --------------------------------------------------------------------------
 const RX = {
-  saludo: /^(hola|holi|buenas|hey|ola|que tal|buenos dias|buenas tardes|buenas noches|hi)\b/,
-  gracias: /(gracias|thank|genial|excelente|perfecto|buenisimo)/,
-  amigo: /(mi amigo|amigo secreto|le gusta|a el|a ella|para quien|a quien me toco|que le regalo|que le compro|regalarle|mi pareja de intercambio)/,
-  quiero: /(quiero|me gustaria|me encantaria|deseo|pedir|pido|anota|apunta|agrega|sueno con|quisiera|me hace falta|necesito)/,
-  presupuesto: /(presupuesto|monto|cuanto|precio|barato|economico|plata|soles|costo)/,
-  fecha: /(cuando|fecha|dia del|evento|navidad|reunion|hora)/,
-  reglas: /(regla|como funciona|como se juega|instruccion|ayuda|que puedes hacer|que haces)/,
-  ideas: /(idea|sugerencia|sugiere|recomienda|recomendacion|opcion|dame|propon|no se que)/,
-  ver: /(mi lista|que anote|que guarde|mis deseos|mi wishlist)/
+  cosquillas:  /\b(cosquilla|cosquillas|jaja|jeje|risa|gracioso|chistoso|haz me reir|hazme reir)\b/i,
+  fisgon:      /\b(a qui[eé]n le toc[oó]|qui[eé]n tiene a|a qui[eé]n sac[oó]|qui[eé]n le sali[oó]|qui[eé]n es el amigo secreto de|de qui[eé]n es amigo secreto|dime a qui[eé]n|qui[eé]n me tiene|qui[eé]n me sac[oó])\b/i,
+  recadoResp:  /^(s[ií]|ya|dale|mandale|m[aá]ndale|env[ií]ale|dile|responde|contesta)\b/i,
+  recado:      /\b(preg[uú]ntale|dile|mand[aá]le|m[aá]ndale|av[ií]sale|cu[eé]ntale|escr[ií]bele|recado|mensaje para)\b/i,
+  afinidad:    /\b(parecido|parezco|afinidad|en com[uú]n|mejor amigo|me parezco|quien se parece|con qui[eé]n)\b/i,
+  grupo:       /\b(grupo|amigos|participantes|qui[eé]nes? (est[aá]n|hay|somos)|cu[aá]ntos|falta|faltan|lista de amigos)\b/i,
+  quienEs:     /\b(qui[eé]n es|h[aá]blame de|cu[eé]ntame de|conoces a|c[oó]mo es)\b/i,
+  juego:       /\b(juguemos|juego|jugar|adivina|adivinanza|trivia|aburr|entret[eé]n|hazme|algo divertido)\b/i,
+  aprenderDe:  /\b(le gusta a|a \w+ le gusta|es muy|es bien|es un|es una)\b/i,
+  noQuiero:    /\b(no me gusta|odio|detesto|no quiero|no me gustan|no soporto)\b/i,
+  quiero:      /\b(quiero|quisiera|me gustar[ií]a|me encanta|me gusta|me fascina|s[uú]beme|an[oó]tame|ap[uú]ntame)\b/i,
+  amigo:       /\b(mi amigo|amigo secreto|le gusta|regalarle|qu[eé] le|para [eé]l|para ella|a qui[eé]n le regalo)\b/i,
+  ideas:       /\b(idea|ideas|regalo|regalos|sugerencia|sugiere|recomienda|recomiendame|qu[eé] compro|qu[eé] le compro)\b/i,
+  presupuesto: /\b(monto|presupuesto|cu[aá]nto|precio|plata|soles|gastar|vale)\b/i,
+  fecha:       /\b(fecha|cu[aá]ndo|d[ií]a|navidad|lugar|d[oó]nde)\b/i,
+  reglas:      /\b(regla|reglas|c[oó]mo funciona|qu[eé] hago|ayuda|ayudame|no entiendo|sorteo)\b/i,
+  verLista:    /\b(mi lista|mis deseos|qu[eé] ped[ií]|qu[eé] sabes de m[ií]|mi perfil|qu[eé] aprendiste)\b/i,
+  gracias:     /\b(gracias|genial|buenaz|excelente|perfecto|te quiero|eres lo máximo|crack)\b/i,
+  saludo:      /\b(hola|buenas|hey|qu[eé] tal|holi|saludos|buen d[ií]a|buenas tardes|buenas noches)\b/i
 };
 
-async function responder({ user, amigo, texto }) {
+// --------------------------------------------------------------------------
+// Guardas de privacidad
+// --------------------------------------------------------------------------
+
+/** Frases con las que el duende esquiva a los curiosos, siempre con gracia. */
+const ESQUIVES = [
+  'Ni de broma 🤐 Ese es EL secreto. Puedo contarte de sus gustos, de quién se parece a quién, de todo… menos de eso.',
+  'Jajaja lo intentaste 😄 Pero soy una tumba. Lo único que sé decirte es a quién te tocó a ti, nada más.',
+  'Mis labios están sellados con cinta navideña 🎀 Pregúntame cualquier otra cosa del grupo y te cuento todo.',
+  'Nop. Si suelto eso me quitan el gorro 🧝 Pero sí te digo qué le gusta a la gente, ¿te sirve?'
+];
+
+/**
+ * ¿Este texto intenta contar a quién le tocó quién?
+ * Se usa para revisar los recados antes de entregarlos: un amigo puede
+ * escribirle a otro lo que quiera, menos destripar el sorteo.
+ */
+function revelaSorteo(texto) {
   const t = norm(texto);
-  const monto = getConfig('monto');
-  const aprendido = [];
-  let reply;
-
-  // --- el usuario cuenta lo que quiere -> el bot aprende ---
-  if (RX.quiero.test(t) && !RX.amigo.test(t)) {
-    const limpio = texto
-      .replace(/^(.*?)(quiero|me gustaría|me gustaria|me encantaría|me encantaria|deseo|quisiera|pedir|pido|anota|apunta|agrega|necesito|me hace falta)\s*/i, '')
-      .replace(/^(que|de|un|una|unos|unas|el|la|los|las)\s+/i, '')
-      .trim();
-    const partes = limpio.split(/\s*(?:,|;|\by\b|\bo\b|\/)\s*/).map(s => s.trim()).filter(s => s.length > 2);
-    for (const p of (partes.length ? partes : [limpio])) {
-      if (await guardarDeseo(user.id, p)) aprendido.push(p);
-    }
-    const { ideas } = ideasParaTexto(limpio, 3);
-    reply = aprendido.length
-      ? `¡Anotado en tu lista! ✍️🎁\n\n${aprendido.map(a => `✅ ${a}`).join('\n')}\n\nCuando tu amigo secreto me pregunte por ti, le voy a soplar esto 😉\n\nTambién le sugeriría:\n${ideas.map(i => `• ${i}`).join('\n')}\n\n¿Quieres agregar algo más? Escribe "quiero ..." otra vez.`
-      : `Eso ya estaba en tu lista 😄 Escribe "mi lista" para verla completa, o cuéntame otra cosa que te gustaría.`;
-  }
-
-  // --- el usuario pregunta por su amigo secreto ---
-  else if (RX.amigo.test(t)) {
-    if (!amigo) {
-      reply = `Todavía no puedo decirte nada de tu amigo secreto 🤫\nEl sorteo se realiza automáticamente cuando los ${getConfig('max_participantes')} participantes estén registrados. Mientras tanto, cuéntame qué te gustaría recibir a ti y lo guardo en tu lista.`;
-    } else {
-      const { ideas, cats } = ideasParaTexto(perfilTexto(amigo), 5);
-      reply = `Tu amigo secreto es ${amigo.nombre} 🤐 Esto es lo que sé de ${amigo.nombre.split(' ')[0]}:\n\n${await fichaAmigo(amigo)}\n\n🎁 Ideas que le encantarían${cats.length ? ` (perfil: ${cats.map(c => c.cat).join(', ')})` : ''}:\n${ideas.map(i => `• ${i}`).join('\n')}\n\n💰 Recuerda el monto acordado: ${monto}.\n¿Quieres más ideas de alguna categoría en particular?`;
-    }
-  }
-
-  // --- ver su propia lista ---
-  else if (RX.ver.test(t)) {
-    const mios = await deseosDe(user.id);
-    reply = mios.length
-      ? `Esta es tu lista de deseos 📜 (solo la ve quien te sacó en el sorteo):\n${mios.map(d => `• ${d.texto}`).join('\n')}`
-      : `Tu lista está vacía 🫙 Cuéntame: "quiero unos audífonos bluetooth" y la empiezo a llenar.`;
-  }
-
-  else if (RX.presupuesto.test(t)) {
-    reply = `El monto acordado para este intercambio es ${monto} 💰\nCon ese presupuesto funcionan muy bien:\n${pick(COMODIN, 4).map(i => `• ${i}`).join('\n')}\n\nSi me dices los gustos de tu amigo, afino las ideas al toque.`;
-  }
-
-  else if (RX.fecha.test(t)) {
-    reply = `🗓️ El intercambio es el ${getConfig('fecha_evento')} en ${getConfig('lugar')}.\n¡No llegues con las manos vacías! 😅 ¿Te doy ideas de regalo?`;
-  }
-
-  else if (RX.reglas.test(t)) {
-    reply = `Así funciona 🎄\n1. Cada quien crea su usuario con sus datos completos (gustos, tallas, deseos).\n2. Cuando se completan los ${getConfig('max_participantes')} participantes, el sorteo se hace solo y al azar.\n3. Al entrar, abres tu regalo sorpresa y descubres a tu amigo secreto.\n4. Puedes ver el perfil de todos, pero nadie sabe a quién le tocó a los demás.\n5. Yo te ayudo con ideas y guardo lo que tú quieres recibir.\n\nPruébame con: "ideas para mi amigo", "quiero un libro", "mi lista", "cuánto es el monto".`;
-  }
-
-  else if (RX.saludo.test(t)) {
-    reply = `${pick(SALUDOS)[0]}\n\nPuedes pedirme:\n• "ideas para mi amigo secreto"\n• "quiero unos audífonos" (lo anoto en tu lista)\n• "mi lista"\n• "cuánto es el monto"`;
-  }
-
-  else if (RX.gracias.test(t) && t.length < 40) {
-    reply = `Un gusto ayudarte 🧝 ✨ Que tu regalo sea el más comentado de la noche.`;
-  }
-
-  // --- búsqueda libre por intereses ---
-  else {
-    const { ideas, cats } = ideasParaTexto(t, 5);
-    if (cats.length) {
-      reply = `Para alguien que le va a ${cats.map(c => c.cat).join(' / ')} te sugiero 🎁:\n${ideas.map(i => `• ${i}`).join('\n')}\n\n💰 Monto acordado: ${monto}. ¿Te muestro el perfil de tu amigo secreto para afinar?`;
-    } else if (RX.ideas.test(t)) {
-      reply = `Van ideas que caen bien a cualquiera 🎄:\n${pick(COMODIN, 5).map(i => `• ${i}`).join('\n')}\n\nDime un interés concreto (gamer, cocina, deporte, lectura, skincare, café...) y te doy ideas más puntuales.`;
-    } else {
-      reply = `No estoy seguro de haber entendido 🤔 pero igual te ayudo:\n${pick(COMODIN, 3).map(i => `• ${i}`).join('\n')}\n\nPrueba con:\n• "ideas para mi amigo secreto"\n• "le gusta el fútbol y la cocina"\n• "quiero una manta polar"`;
-    }
-  }
-
-  await guardarChat(user.id, 'user', texto);
-  await guardarChat(user.id, 'bot', reply);
-  return { reply, aprendido };
+  return /\b(me toc[oó]|te toc[oó]|le toc[oó]|mi amigo secreto es|tu amigo secreto es|su amigo secreto es|tengo a|saqu[eé] a|me sali[oó]|soy tu amigo secreto|eres mi amigo secreto)\b/.test(t);
 }
 
-module.exports = { responder, deseosDe, guardarDeseo, historial, guardarChat, CATALOGO, fichaAmigo };
+// --------------------------------------------------------------------------
+// Memoria de conversación (lo que ya existía) + recados
+// --------------------------------------------------------------------------
+async function guardarChat(userId, rol, texto) {
+  await run('INSERT INTO bot_chat (user_id, rol, mensaje) VALUES (?, ?, ?)', [userId, rol, String(texto).slice(0, 2000)]);
+}
+async function historial(userId, limite = 40) {
+  const filas = await all('SELECT rol, mensaje AS texto, creado FROM bot_chat WHERE user_id = ? ORDER BY id DESC LIMIT ?', [userId, limite]);
+  return filas.reverse();
+}
+async function guardarDeseo(userId, texto) {
+  await run('INSERT INTO bot_memoria (user_id, tipo, texto) VALUES (?, ?, ?)', [userId, 'deseo', String(texto).slice(0, 200)]);
+  await knn.aprender({ usuarioId: userId, tipo: 'gusta', valor: texto, origen: 'chat' });
+}
+async function deseosDe(userId) {
+  const filas = await all("SELECT texto FROM bot_memoria WHERE user_id = ? AND tipo = 'deseo' ORDER BY id DESC LIMIT 12", [userId]);
+  return filas.map(f => f.texto);
+}
+
+/** Deja un recado para otro participante, si no destripa el sorteo. */
+async function dejarRecado({ deId, paraId, texto, anonimo = 0 }) {
+  const t = String(texto || '').trim().slice(0, 400);
+  if (t.length < 2) return { ok: false, motivo: 'vacio' };
+  if (revelaSorteo(t)) return { ok: false, motivo: 'revela' };
+  if (deId === paraId) return { ok: false, motivo: 'a_si_mismo' };
+  const r = await run('INSERT INTO recados (de_id, para_id, texto, anonimo) VALUES (?, ?, ?, ?)', [deId, paraId, t, anonimo ? 1 : 0]);
+  return { ok: true, id: r.lastInsertRowid };
+}
+
+/** Recados que le esperan a alguien. */
+async function recadosDe(paraId) {
+  return all(
+    "SELECT r.id, r.texto, r.anonimo, r.creado, u.nombre AS de_nombre, u.apodo AS de_apodo " +
+    "FROM recados r JOIN usuarios u ON u.id = r.de_id " +
+    "WHERE r.para_id = ? AND r.estado = 'pendiente' ORDER BY r.id ASC LIMIT 5", [paraId]);
+}
+async function marcarRecadoEntregado(id, paraId) {
+  await run("UPDATE recados SET estado = 'entregado', entregado = datetime('now') WHERE id = ? AND para_id = ?", [id, paraId]);
+}
+
+// --------------------------------------------------------------------------
+// Utilidades de conversación
+// --------------------------------------------------------------------------
+
+/** Extrae lo que sigue a un verbo: "quiero una taza y un libro" → [taza, libro] */
+function extraerCosas(texto) {
+  const t = String(texto)
+    .replace(/.*\b(quiero|quisiera|me gustar[ií]a|me encanta[n]?|me gusta[n]?|me fascina[n]?|s[uú]beme|an[oó]tame|ap[uú]ntame|no me gusta[n]?|odio|detesto|no quiero|no soporto)\b/i, '')
+    .replace(/^[\s:,.]+/, '');
+  return t.split(/,| y | o |;|\/|\+/i)
+    .map(x => x.trim().replace(/[.!?]+$/, ''))
+    .filter(x => x.length >= 3 && x.length <= 90)
+    .slice(0, 5);
+}
+
+/** Busca a un participante por nombre o apodo dentro de una frase. */
+function buscarPersona(texto, gente, excluirId = null) {
+  const t = norm(texto);
+  let mejor = null;
+  for (const p of gente) {
+    if (excluirId && p.id === excluirId) continue;
+    for (const etiqueta of [p.apodo, p.nombre, String(p.nombre).split(' ')[0], p.usuario].filter(Boolean)) {
+      const e = norm(etiqueta);
+      if (e.length >= 3 && t.includes(e) && (!mejor || e.length > mejor.largo)) {
+        mejor = { persona: p, largo: e.length };
+      }
+    }
+  }
+  return mejor ? mejor.persona : null;
+}
+
+/** Una pincelada social de alguien, sin tocar jamás el sorteo. */
+async function retrato(p) {
+  const trozos = [];
+  if (p.gustos) trozos.push(`le gusta <b>${p.gustos}</b>`);
+  if (p.hobbies) trozos.push(`en sus ratos libres: <b>${p.hobbies}</b>`);
+  const aprendido = await knn.loAprendido(p.id, 'gusta');
+  if (aprendido.length) trozos.push(`y me ha contado que también <b>${aprendido.slice(0, 2).map(a => a.valor).join('</b> y <b>')}</b>`);
+  if (p.no_gustos) trozos.push(`eso sí, no le va <b>${p.no_gustos}</b>`);
+  return trozos.length ? trozos.join('; ') : 'todavía no ha contado mucho de sí, ¡habría que sacarle conversación!';
+}
+
+// --------------------------------------------------------------------------
+// Juegos para que la espera no aburra
+// --------------------------------------------------------------------------
+async function juego(user, gente) {
+  const otros = gente.filter(g => g.id !== user.id);
+  if (otros.length < 2) {
+    return { texto: 'Cuando haya más amigos registrados te propongo juegos 🎲 Por ahora, cuéntame tú: ¿qué es lo que más te gustaría recibir?', aprende: true };
+  }
+  const tipo = alAzar(['adivina_gusto', 'afinidad', 'dos_verdades']);
+
+  if (tipo === 'adivina_gusto') {
+    const conGustos = otros.filter(o => o.gustos && o.gustos.length > 4);
+    if (conGustos.length) {
+      const p = alAzar(conGustos);
+      return { texto: `🎲 <b>Adivina quién</b><br>A esta persona le gusta: <b>${p.gustos}</b><br>¿Quién crees que es? Escribe su nombre.`, espera: { tipo: 'adivina', id: p.id, nombre: corto(p) } };
+    }
+  }
+  if (tipo === 'afinidad') {
+    const r = await knn.ranking(user.id);
+    if (r.length && r[0].afinidad > 0) {
+      return { texto: `🧮 Según lo que sé de ustedes, con quien más cosas tienes en común es <b>${r[0].apodo || r[0].nombre}</b> (${r[0].afinidad}% de afinidad). ¿Lo sabías? Cuéntame algo más tuyo y recalculo.`, aprende: true };
+    }
+  }
+  const p = alAzar(otros);
+  return { texto: `🎲 <b>Reto rápido</b><br>Dime una cosa que creas que le gusta a <b>${corto(p)}</b>. Si aciertas, lo anoto y le sirve a quien le toque regalarle 😉`, espera: { tipo: 'suponer', id: p.id, nombre: corto(p) } };
+}
+
+// --------------------------------------------------------------------------
+// EL CEREBRO
+// --------------------------------------------------------------------------
+/**
+ * @param {object}  user         quien escribe
+ * @param {object?} amigo        SU amigo secreto (o null). Nunca el de otro.
+ * @param {string}  texto        lo que escribió
+ * @param {object}  ctx          { sorteoHecho, total, max, monto, fecha, lugar }
+ * @param {object?} espera       lo que el duende dejó pendiente en el turno anterior
+ */
+async function responder({ user, amigo, texto, ctx = {}, espera = null }) {
+  const t = String(texto || '').trim();
+  await guardarChat(user.id, 'user', t);
+
+  const gente = await all(
+    "SELECT id, usuario, nombre, apodo, gustos, no_gustos, hobbies FROM usuarios " +
+    "WHERE rol = 'participante' AND activo = 1 ORDER BY id"
+  );
+  const otros = gente.filter(g => g.id !== user.id);
+  const faltan = Math.max(0, (ctx.max || 8) - (ctx.total || gente.length));
+
+  const salida = (texto, extra = {}) => ({ texto, ...extra });
+  let r;
+
+  // ---- 0. ¿Estábamos esperando algo del turno anterior? -------------------
+  if (espera && espera.tipo === 'adivina') {
+    const acerto = norm(t).includes(norm(espera.nombre));
+    r = salida(acerto
+      ? `¡Correcto! 🎉 Era <b>${espera.nombre}</b>. Se nota que se conocen.`
+      : `Casi 😄 Era <b>${espera.nombre}</b>. ¿Jugamos otra?`);
+  } else if (espera && espera.tipo === 'suponer') {
+    const cosas = extraerCosas(t).length ? extraerCosas(t) : [t];
+    for (const c of cosas) {
+      await knn.aprender({ usuarioId: espera.id, tipo: 'gusta', valor: c, origen: 'tercero', autorId: user.id });
+    }
+    r = salida(`Anotado 📝 Dices que a <b>${espera.nombre}</b> le gusta <b>${cosas.join('</b>, <b>')}</b>. Lo guardo: le servirá a quien le toque regalarle (y no, no te voy a decir quién es 😏).`);
+  } else if (espera && espera.tipo === 'recado_texto') {
+    const destino = gente.find(g => g.id === espera.id);
+    const res = await dejarRecado({ deId: user.id, paraId: espera.id, texto: t });
+    r = salida(
+      res.ok ? `¡Listo! 🧝‍♂️ Vuelo a decirle a <b>${corto(destino)}</b>: «${t}». Se lo entrego apenas entre.`
+      : res.motivo === 'revela' ? `Uy, ahí casi destripas el sorteo 🤐 Eso no lo llevo. Mándale otra cosa y con gusto se la digo.`
+      : `No pude llevar ese recado. ¿Lo intentas de otra forma?`);
+  }
+
+  // ---- 1. Curiosos: la guarda va antes que todo lo demás ------------------
+  else if (RX.fisgon.test(t)) {
+    r = salida(alAzar(ESQUIVES), { sugerencias: ['¿Qué le gusta a…?', '¿Con quién me parezco?', 'Dame ideas'] });
+  }
+
+  // ---- 2. Recados: el duende de mensajero ---------------------------------
+  else if (RX.recado.test(t)) {
+    const destino = buscarPersona(t, gente, user.id);
+    if (!destino) {
+      r = salida(`¿A quién le llevo el recado? Dime su nombre, por ejemplo: «dile a ${corto(alAzar(otros.length ? otros : gente))} que…»`,
+        { sugerencias: otros.slice(0, 3).map(o => `Dile a ${corto(o)} que…`) });
+    } else {
+      // ¿ya viene el mensaje en la misma frase?
+      const m = t.match(/\b(?:que|:)\s+(.{3,300})$/i);
+      if (m) {
+        const res = await dejarRecado({ deId: user.id, paraId: destino.id, texto: m[1] });
+        r = salida(
+          res.ok ? `¡Volando voy! 🧝‍♂️💨 Le digo a <b>${corto(destino)}</b>: «${m[1]}»`
+          : res.motivo === 'revela' ? 'Ese recado casi suelta el secreto del sorteo 🤐 No lo llevo. Mándale otra cosa.'
+          : 'No pude llevar ese recado, inténtalo de otra forma.');
+      } else {
+        r = salida(`Dale, ¿qué le digo a <b>${corto(destino)}</b>? Escríbelo y se lo llevo volando 💨`,
+          { espera: { tipo: 'recado_texto', id: destino.id, nombre: corto(destino) } });
+      }
+    }
+  }
+
+  // ---- 3. Cosquillas ------------------------------------------------------
+  else if (RX.cosquillas.test(t)) {
+    r = salida(alAzar([
+      '¡JAJAJA no, las cosquillas no! 🤣 Se me cae el gorro y los cascabeles 🔔',
+      '¡Ay, ay, ay! 😂 Me rindo, me rindo… pero igual no suelto el secreto 🤐',
+      'Jijiji 🧝 ¡me haces reír! Oye, ya que estamos de buen humor, ¿te doy una idea de regalo?'
+    ]), { animacion: 'cosquillas' });
+  }
+
+  // ---- 4. Afinidad: "¿con quién me parezco?" ------------------------------
+  else if (RX.afinidad.test(t)) {
+    const rk = await knn.ranking(user.id);
+    if (!rk.length) {
+      r = salida('Todavía no hay con quién compararte 😅 Cuando se registren más amigos te digo con quién tienes más en común.');
+    } else {
+      const top = rk.slice(0, 3);
+      r = salida(
+        `🧮 Calculé la afinidad comparando los gustos de todos:<br>` +
+        top.map((p, i) => `${['🥇', '🥈', '🥉'][i]} <b>${p.apodo || p.nombre}</b> — ${p.afinidad}%`).join('<br>') +
+        `<br><br>Con <b>${top[0].apodo || top[0].nombre}</b> eres el que más cosas comparte. Cuéntame más de ti y lo recalculo 😉`,
+        { sugerencias: [`¿Quién es ${top[0].apodo || String(top[0].nombre).split(' ')[0]}?`, `Dile a ${top[0].apodo || String(top[0].nombre).split(' ')[0]} que…`, 'Juguemos algo'] });
+    }
+  }
+
+  // ---- 5. El grupo --------------------------------------------------------
+  else if (RX.grupo.test(t)) {
+    const nombres = gente.map(g => `<b>${corto(g)}</b>`).join(', ');
+    r = salida(
+      faltan > 0
+        ? `Por ahora somos <b>${gente.length}</b> de <b>${ctx.max || 8}</b>: ${nombres}.<br>Faltan <b>${faltan}</b> para que se dispare el sorteo 🎲 Mientras tanto, ¿quieres que te cuente de alguien o jugamos algo?`
+        : `¡Ya estamos completos! 🎉 Somos <b>${gente.length}</b>: ${nombres}.<br>${ctx.sorteoHecho ? 'El sorteo ya se hizo 🎁' : 'El sorteo está por salir 🎲'}`,
+      { sugerencias: otros.slice(0, 2).map(o => `¿Quién es ${corto(o)}?`).concat(['¿Con quién me parezco?']) });
+  }
+
+  // ---- 6. "¿Quién es Peter?" ---------------------------------------------
+  else if (RX.quienEs.test(t)) {
+    const p = buscarPersona(t, gente, null);
+    if (!p) {
+      r = salida(`¿De quién te cuento? Están: ${gente.map(g => `<b>${corto(g)}</b>`).join(', ')}`,
+        { sugerencias: otros.slice(0, 3).map(o => `¿Quién es ${corto(o)}?`) });
+    } else if (p.id === user.id) {
+      r = salida(`¡Ese eres tú! 😄 Y sé que ${await retrato(p)}`);
+    } else {
+      const af = await knn.afinidad(user.id, p.id);
+      r = salida(
+        `🧝 <b>${corto(p)}</b>: ${await retrato(p)}.<br><br>` +
+        (af > 0 ? `Por cierto, tienen un <b>${af}%</b> de cosas en común.` : '') +
+        `<br>¿Quieres que le lleve un recado?`,
+        { sugerencias: [`Dile a ${corto(p)} que…`, '¿Con quién me parezco?', 'Dame ideas'] });
+    }
+  }
+
+  // ---- 7. Juegos ----------------------------------------------------------
+  else if (RX.juego.test(t)) {
+    const j = await juego(user, gente);
+    r = salida(j.texto, j.espera ? { espera: j.espera } : {});
+  }
+
+  // ---- 8. Aprender sobre un tercero: "a Peter le gusta la guitarra" -------
+  else if (RX.aprenderDe.test(t) && buscarPersona(t, gente, user.id)) {
+    const p = buscarPersona(t, gente, user.id);
+    const cosas = extraerCosas(t.replace(new RegExp(norm(corto(p)), 'i'), ''));
+    const lista = cosas.length ? cosas : [t.replace(/.*\ble gusta\b/i, '').trim()].filter(x => x.length > 2);
+    if (!lista.length) {
+      r = salida(`Cuéntame qué le gusta a <b>${corto(p)}</b> y lo anoto 📝`);
+    } else {
+      for (const c of lista) await knn.aprender({ usuarioId: p.id, tipo: 'gusta', valor: c, origen: 'tercero', autorId: user.id });
+      r = salida(`Anotado 📝 A <b>${corto(p)}</b> le gusta <b>${lista.join('</b>, <b>')}</b>. Esto le va a servir muchísimo a quien le toque regalarle 😉`);
+    }
+  }
+
+  // ---- 9. "No me gusta…" --------------------------------------------------
+  else if (RX.noQuiero.test(t)) {
+    const cosas = extraerCosas(t);
+    for (const c of cosas) await knn.aprender({ usuarioId: user.id, tipo: 'no_gusta', valor: c, origen: 'chat' });
+    r = salida(cosas.length
+      ? `Entendido, nada de <b>${cosas.join('</b>, <b>')}</b> ❌ Lo tacho de tu perfil para que no te lo regalen.`
+      : '¿Qué es lo que no te gusta? Así evito recomendarlo.');
+  }
+
+  // ---- 10. "Quiero…" ------------------------------------------------------
+  else if (RX.quiero.test(t)) {
+    const cosas = extraerCosas(t);
+    for (const c of cosas) await guardarDeseo(user.id, c);
+    const mios = await deseosDe(user.id);
+    r = salida(cosas.length
+      ? `¡Anotado! 📝 Agregué <b>${cosas.join('</b>, <b>')}</b> a tu lista.<br>Ya llevas <b>${mios.length}</b> cosa(s). Solo lo ve quien te sacó 🔒`
+      : '¿Qué te gustaría recibir? Dímelo y lo anoto en tu lista secreta.');
+  }
+
+  // ---- 11. Sobre MI amigo secreto (solo el propio) ------------------------
+  else if ((RX.amigo.test(t) || RX.ideas.test(t)) && amigo) {
+    const rec = await knn.recomendar(amigo.id, { n: 4 });
+    const extra = await knn.loAprendido(amigo.id, 'gusta');
+    r = salida(
+      `Tu amigo secreto es <b>${corto(amigo)}</b> 🎁<br>` +
+      (amigo.gustos ? `Le gusta: <b>${amigo.gustos}</b>.<br>` : '') +
+      (extra.length ? `Además me contaron que <b>${extra.slice(0, 3).map(e => e.valor).join('</b>, <b>')}</b>.<br>` : '') +
+      `<br><b>Mis recomendaciones</b> (calculadas con lo que sé de él y de quienes se le parecen):<br>` +
+      rec.ideas.map(i => `🎁 <b>${i.idea}</b> <span class="porque">— ${i.porque}</span>`).join('<br>') +
+      (rec.vecinos.length ? `<br><br><span class="porque">Comparé su perfil con ${rec.vecinos.map(v => v.nombre + ' (' + v.similitud + '%)').join(', ')}.</span>` : ''),
+      { ideas: rec.ideas.map(i => i.idea), sugerencias: ['Otra idea', `¿Quién es ${corto(amigo)}?`, 'El monto'] });
+  }
+
+  // ---- 12. Ideas sin sorteo todavía ---------------------------------------
+  else if (RX.ideas.test(t)) {
+    if (faltan > 0) {
+      const p = otros.length ? alAzar(otros) : null;
+      r = salida(
+        `El sorteo aún no sale (faltan <b>${faltan}</b> amigos) así que todavía no sé a quién le regalas 🎲<br>` +
+        (p ? `Pero puedo irte entrenando: ${corto(p)} ${await retrato(p)}.<br>` : '') +
+        `Cuéntame tú qué te gusta y así, cuando salga el sorteo, quien te saque la tendrá fácil.`,
+        { sugerencias: ['Quiero pedir algo', '¿Quiénes están?', 'Juguemos algo'] });
+    } else {
+      r = salida('El sorteo está por salir 🎲 En cuanto salga te doy ideas hechas a medida para tu amigo secreto.');
+    }
+  }
+
+  // ---- 13. Datos del evento ----------------------------------------------
+  else if (RX.presupuesto.test(t)) {
+    r = salida(`El monto acordado es <b>${ctx.monto || 'por definir'}</b> 💰 Con eso alcanza de sobra para algo bonito y pensado.`);
+  } else if (RX.fecha.test(t)) {
+    r = salida(`📅 El intercambio es el <b>${ctx.fecha || 'por definir'}</b>${ctx.lugar ? ` en <b>${ctx.lugar}</b>` : ''}. ¡No lo dejes para el último día!`);
+  } else if (RX.reglas.test(t)) {
+    r = salida(
+      `Así funciona 🎄<br>` +
+      `1. Cada quien crea su cuenta y llena sus gustos.<br>` +
+      `2. Cuando estemos <b>${ctx.max || 8}</b>, el sorteo sale solo 🎲<br>` +
+      `3. Solo tú ves a quién te tocó. <b>Nadie</b> ve el de los demás, ni yo lo cuento 🤐<br>` +
+      `4. Monto: <b>${ctx.monto || 'por definir'}</b> · Fecha: <b>${ctx.fecha || 'por definir'}</b><br><br>` +
+      `Yo mientras te doy ideas, te cuento del grupo y llevo recados 🧝`,
+      { sugerencias: ['¿Quiénes están?', 'Dame ideas', 'Juguemos algo'] });
+  }
+
+  // ---- 14. "¿Qué sabes de mí?" -------------------------------------------
+  else if (RX.verLista.test(t)) {
+    const mios = await deseosDe(user.id);
+    const ap = await knn.loAprendido(user.id);
+    const gusta = ap.filter(a => a.tipo === 'gusta');
+    const noGusta = ap.filter(a => a.tipo === 'no_gusta');
+    r = salida(
+      `Esto es lo que sé de ti 🧠<br>` +
+      (mios.length ? `📋 Tu lista: <b>${mios.join('</b>, <b>')}</b><br>` : '📋 Tu lista está vacía.<br>') +
+      (gusta.length ? `👍 Te gusta: <b>${gusta.slice(0, 6).map(a => a.valor).join('</b>, <b>')}</b><br>` : '') +
+      (noGusta.length ? `👎 Evitar: <b>${noGusta.slice(0, 5).map(a => a.valor).join('</b>, <b>')}</b><br>` : '') +
+      `<br>Todo esto lo ve <b>solo</b> quien te sacó en el sorteo 🔒`);
+  }
+
+  // ---- 15. Cortesías ------------------------------------------------------
+  else if (RX.gracias.test(t)) {
+    r = salida(alAzar(['¡Para eso estoy! 🧝 ¿Algo más?', '¡Un gusto! Si quieres te cuento algo del grupo 🎄', '😊 Cuando quieras. ¿Jugamos algo mientras esperamos?']));
+  } else if (RX.saludo.test(t)) {
+    r = salida(
+      `¡Hola, <b>${corto(user)}</b>! 🧝 ` +
+      (ctx.sorteoHecho && amigo ? `Ya salió el sorteo, ¿te doy ideas para tu amigo secreto?`
+        : faltan > 0 ? `Vamos <b>${gente.length}</b> de <b>${ctx.max || 8}</b>, faltan ${faltan}. ¿Jugamos algo mientras?`
+        : `Ya estamos completos, el sorteo está por salir 🎲`),
+      { sugerencias: ctx.sorteoHecho ? ['Dame ideas', '¿Con quién me parezco?', 'Juguemos algo'] : ['¿Quiénes están?', 'Quiero pedir algo', 'Juguemos algo'] });
+  }
+
+  // ---- 16. No entendí: aprendo igual --------------------------------------
+  else {
+    const cosas = extraerCosas(t);
+    if (cosas.length && t.length < 120) {
+      for (const c of cosas) await knn.aprender({ usuarioId: user.id, tipo: 'gusta', valor: c, origen: 'chat' });
+      r = salida(`Lo anoto 📝 (<b>${cosas.join('</b>, <b>')}</b>). Cuéntame más, así afino lo que te recomiendo.`);
+    } else {
+      r = salida(
+        `No te entendí del todo 😅 Pero puedo:<br>` +
+        `🎁 darte ideas de regalo · 🧮 decirte con quién te pareces · 👥 contarte del grupo · ` +
+        `💌 llevar recados · 🎲 jugar contigo`,
+        { sugerencias: ['Dame ideas', '¿Quiénes están?', '¿Con quién me parezco?', 'Juguemos algo'] });
+    }
+  }
+
+  await guardarChat(user.id, 'bot', r.texto);
+  return r;
+}
+
+module.exports = {
+  responder, historial, guardarChat, guardarDeseo, deseosDe,
+  dejarRecado, recadosDe, marcarRecadoEntregado, revelaSorteo,
+  CATALOGO: knn.CATALOGO
+};
