@@ -78,6 +78,8 @@ const ABREVIATURAS = {
   grax: 'gracias', gracs: 'gracias', graxias: 'gracias',
   nmas: 'nomas', ay: 'hay',
   oe: 'oye', ps: 'pues', pe: 'pues',
+  ola: 'hola', olas: 'hola', wena: 'buenas', wenas: 'buenas', wenos: 'buenos',
+  alo: 'hola', hey: 'hola', ey: 'hola', epa: 'hola', holi: 'hola', holis: 'hola',
   amix: 'amigo', amixs: 'amigos', bro: 'amigo',
   xfa: 'por favor', pls: 'por favor',
   msj: 'mensaje', mnsj: 'mensaje', rgalo: 'regalo',
@@ -110,6 +112,10 @@ function normalizar(texto) {
   t = t.replace(/(\d)[.,](\d)/g, '$1 $2');            // 1.500 -> 1 500
   t = t.replace(/[^a-z0-9%ñ\s]/g, ' ');
   t = t.replace(/\s+/g, ' ').trim();
+  // "holaaa" -> "hola", "siii" -> "si": alargar la ultima letra es la forma de
+  // gritar por escrito. Solo al final de la palabra: en medio romperia carro,
+  // ella, perro.
+  t = t.replace(/([a-zñ])\1+\b/g, '$1');
   // y se desarman las abreviaturas del chat
   return t.split(' ').map(w => ABREVIATURAS[w] || w).join(' ');
 }
@@ -130,10 +136,18 @@ function clausulas(texto) {
  */
 function compilarPatron(patron) {
   const palabras = normalizar(patron).split(' ').filter(Boolean);
+
+  // Un conector solo puede sobrar si queda algo mas que acote el patron. En
+  // "cuentame de" el "de" ES el patron: sin el queda "cuentame", que engancha
+  // con "cuentame un chiste" y con todo lo demas. La regla: se aflojan los
+  // conectores unicamente si quedan dos o mas palabras con contenido.
+  const conContenido = palabras.filter(w => !CONECTORES.has(w)).length;
+  const aflojar = conContenido >= 2;
+
   const partes = [];
   let opcional = '';                       // conectores que se pegan al siguiente trozo
   for (const w of palabras) {
-    if (CONECTORES.has(w) && palabras.length > 1) {
+    if (CONECTORES.has(w) && aflojar) {
       opcional += '(?:' + escapar(w) + '\\s+)?';
       continue;
     }
@@ -191,7 +205,21 @@ const LEXICO = {
     'cuantos somos', 'cuantos faltan', 'cuanto falta', 'lista de amigos', 'ya estamos completos',
     'quienes van'],
   quienEs: ['quien es', 'hablame de', 'cuentame de', 'conoces a', 'como es', 'que dice de', 'descripcion de',
-    'quien seria'],
+    'quien seria', 'que sabes de', 'que me dices de', 'dime de', 'describeme a', 'informacion de',
+    'datos de', 'que le gusta a', 'que quiere', 'que pidio', 'cuentame sobre', 'sabes algo de'],
+
+  // Preguntar por MI AMIGO SECRETO no es preguntar por mi. Esta entrada existe
+  // para que no se la coma la rama de la memoria propia, que reconoce
+  // "que sabes de mi" y se disparaba tambien con "que sabes de mi amigo".
+  miAmigo: ['mi amigo secreto', 'mi amiga secreta', 'mi amigo', 'mi amiga', 'a quien le regalo',
+    'a quien tengo que regalar', 'el que me toco', 'la que me toco', 'a quien saque yo',
+    'para quien compro', 'a quien le toca mi regalo'],
+
+  // Jugar de verdad: sustos y chistes
+  susto: ['asustame', 'dame un susto', 'hazme un susto', 'pegame un susto', 'asusta', 'da miedo',
+    'hazme asustar', 'espantame'],
+  chiste: ['un chiste', 'cuentame un chiste', 'dime un chiste', 'algo gracioso', 'una broma',
+    'hazme reir', 'cuentame una broma', 'dime algo chistoso', 'echate un chiste'],
   jugar: ['juguemos', 'jugar', 'un juego', 'adivina', 'adivinanza', 'trivia', 'estoy aburrido', 'me aburro',
     'entretenme', 'algo divertido', 'hazme jugar'],
 
@@ -234,6 +262,9 @@ const LEXICO = {
  * falsos positivos tipicos de buscar patrones sueltos.
  */
 const EXCLUSIONES = {
+  // "que sabes de MI AMIGO secreto" no es una pregunta sobre uno mismo
+  recordar: ['mi amigo', 'mi amiga', 'amigo secreto', 'amiga secreta'],
+  miLista: ['mi amigo', 'mi amiga', 'amigo secreto'],
   recado: ['dilema', 'dile a nadie'],
   jugar: ['jugador'],
   navidad: ['feliz navidad', 'navidad a todos'],
@@ -492,7 +523,7 @@ const PRIORIDAD = [
   'despertar', 'dormir', 'hablarYa', 'callar',
   'recadoPublico', 'guardar', 'olvidar', 'recordar',
   'recado', 'cosquillas', 'triste', 'feliz',
-  'afinidad', 'grupo', 'quienEs', 'jugar',
+  'afinidad', 'grupo', 'miAmigo', 'quienEs', 'jugar', 'susto', 'chiste',
   'ideas', 'consejo', 'miLista', 'presupuesto', 'fechaEvento', 'reglas',
   'contar', 'navidad',
   'gracias', 'saludo'

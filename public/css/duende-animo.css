@@ -216,3 +216,30 @@
     transform: none;
   }
 }
+
+
+/* ==========================================================
+   EL SUSTO
+   ==========================================================
+   Un salto corto hacia arriba y un tembleque. Dura poco a proposito: la
+   gracia esta en el "era broma" que viene justo detras, no en el susto. */
+@keyframes duende-sustaso {
+  0%   { transform: translateY(0) scale(1); }
+  12%  { transform: translateY(-16px) scale(1.14); }
+  26%  { transform: translateY(0) scale(1); }
+  36%  { transform: translateX(-7px) rotate(-6deg); }
+  48%  { transform: translateX(7px) rotate(6deg); }
+  60%  { transform: translateX(-5px) rotate(-4deg); }
+  72%  { transform: translateX(5px) rotate(4deg); }
+  100% { transform: none; }
+}
+.duende-widget.asustando .duende-lanzador {
+  animation: duende-sustaso .95s ease-out 1;
+}
+.duende-widget.asustando .duende-aura {
+  box-shadow: 0 0 34px 12px rgba(255, 99, 99, .45);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .duende-widget.asustando .duende-lanzador { animation: none; }
+}

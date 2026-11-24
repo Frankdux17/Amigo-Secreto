@@ -136,6 +136,29 @@ Un personaje animado en SVG (camina, saluda, parpadea, le suena el pompón) acom
   el literal (barato y exacto) y, si falla, el comprensivo (con certeza). La privacidad del
   sorteo ganó con esto, porque ahora *«a kien le toco»* se reconoce igual que *«a quién le tocó»*.
 
+- **Sabe cuándo NO entendió, y lo dice.** Antes, al no reconocer algo, contestaba
+  *«Lo anoto 📝»* y **guardaba tu pregunta como si fuera una confidencia tuya**: el cuaderno
+  acababa con recuerdos del tipo *«DE ELENA VEGA QUE SABES»*, que encima luego repetía. Ahora
+  una pregunta nunca se aprende como un dato, y cuando no pilla la frase propone **las formas
+  de preguntar que más se parecen** a lo que escribiste —un *«¿me quisiste decir alguna de
+  estas?»* calculado con el mismo KNN sobre texto del módulo 4 de TecniBot, con TF-IDF de
+  n-gramas de letras.
+
+- **Distingue por quién preguntas.** *«¿Qué sabes de mí?»*, *«¿Qué sabes de mi amigo secreto?»* y
+  *«De Elena Vega, ¿qué sabes?»* se parecen mucho por escrito y no tienen nada que ver. Las dos
+  últimas iban a parar a la memoria propia, porque *«qué sabes de mi»* vive literalmente dentro
+  de *«qué sabes de mi amigo»*. Cada detector tiene ahora un **veto** que lo impide.
+
+- **Una pregunta nueva cancela la suya.** El duende suele dejar una pregunta abierta; si lo
+  siguiente que llega es otra pregunta en vez de una respuesta, suelta la suya en lugar de
+  guardarte la tuya como contestación.
+
+- **Juega de verdad: sustos y chistes.** *«asústame»* y pega un brinco… e inmediatamente
+  tranquiliza: *«no te asustes, solo estoy jugando; así me programó mi creador, soy un ángel,
+  así que no me tengas miedo, estoy para ayudarte»*. Las dos mitades van siempre en el mismo
+  mensaje: un susto sin el *«era broma»* detrás no es un juego, es un mal rato. También tiene
+  chistes, y de vez en cuando asusta por iniciativa propia.
+
 - **Enseña lo que leyó entre líneas.** Si tuvo que corregir ortografía para entenderte, lo dice:
   *«Por si acaso: leí «chcolate» como «chocolate» 👀»*. Sirve para que veas que te entendió —y no
   que acertó de casualidad— y para que puedas desmentirlo.

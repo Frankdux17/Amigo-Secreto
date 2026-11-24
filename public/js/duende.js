@@ -431,8 +431,8 @@
   /** Chips de sugerencia. El servidor manda las suyas según la conversación. */
   function chips(lista) {
     const porDefecto = estado && estado.amigo
-      ? ['🎁 Dame ideas', '💡 Dame un consejo', '👀 ¿Qué le gusta?', '🧮 ¿Con quién me parezco?', '🧠 Guarda esto de mí', '📖 Si alguien pregunta por mí…', '🎲 Juguemos algo', '💭 Cuéntame algo']
-      : ['💡 Dame un consejo', '👥 ¿Quiénes están?', '✍️ Quiero pedir algo', '🧠 Guarda esto de mí', '📖 Si alguien pregunta por mí…', '🧮 ¿Con quién me parezco?', '🎲 Juguemos algo', '💭 Cuéntame algo'];
+      ? ['🎁 Dame ideas', '💡 Dame un consejo', '👀 ¿Qué le gusta?', '🧮 ¿Con quién me parezco?', '🧠 Guarda esto de mí', '📖 Si alguien pregunta por mí…', '🎲 Juguemos algo', '😂 Cuéntame un chiste', '👻 Asústame', '💭 Cuéntame algo']
+      : ['💡 Dame un consejo', '👥 ¿Quiénes están?', '✍️ Quiero pedir algo', '🧠 Guarda esto de mí', '📖 Si alguien pregunta por mí…', '🧮 ¿Con quién me parezco?', '🎲 Juguemos algo', '😂 Cuéntame un chiste', '👻 Asústame', '💭 Cuéntame algo'];
     const usar = (lista && lista.length) ? lista : porDefecto;
 
     sugerencias.innerHTML = '';
@@ -524,8 +524,9 @@
       if (d.hablar) silenciarVoz(false);
       burbuja('bot', d.reply);
       if (d.espera) esperaActual = d.espera;
-      if (d.animacion === 'cosquillas') reir();
+      if (d.animacion === 'cosquillas' || d.animacion === 'risa') reir();
       if (d.animacion === 'volar') volar();
+      if (d.animacion === 'susto') asustar();
       if (d.ideas) botonesIdea(d.ideas);
       chips(d.sugerencias);
     } catch (e) {
@@ -599,6 +600,13 @@
   // ==========================================================
   let toques = 0;
   let relojToques = null;
+
+  /** El brinco del susto. El "era broma" lo pone el texto, no la animacion. */
+  function asustar() {
+    if (quietoPorPreferencia) return;
+    widget.classList.add('asustando');
+    setTimeout(() => widget.classList.remove('asustando'), 1000);
+  }
 
   function reir() {
     widget.classList.add('riendo');

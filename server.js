@@ -408,12 +408,17 @@ app.get('/api/estado', pedirLogin, A(async (req, res) => {
   const a = yo.rol === 'participante' ? await sorteo.asignacionDe(yo.id) : null;
   let amigo = null;
   if (a) {
-    const extra = (await bot.deseosDe(a.id)).map(d => d.texto);
+    // deseosDe() ya devuelve los textos. Pedirles .texto otra vez daba
+    // undefined, y un undefined dentro de un array sale como null al
+    // serializar a JSON: de ahi el «• null» que aparecia en la lista.
+    const extra = await bot.deseosDe(a.id);
     amigo = {
       id: Number(a.id), nombre: a.nombre, apodo: a.apodo, foto: a.foto,
       gustos: a.gustos, hobbies: a.hobbies, color_favorito: a.color_favorito,
       talla_ropa: a.talla_ropa, talla_zapato: a.talla_zapato, no_gustos: a.no_gustos,
-      deseos: [a.deseo1, a.deseo2, a.deseo3].filter(Boolean).concat(extra)
+      deseos: [a.deseo1, a.deseo2, a.deseo3].concat(extra)
+        .map(v => String(v == null ? '' : v).trim())
+        .filter(v => v.length > 0 && v.toLowerCase() !== 'null')
         .filter((v, i, arr) => arr.indexOf(v) === i)
     };
   }

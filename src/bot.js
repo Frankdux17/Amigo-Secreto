@@ -129,13 +129,19 @@ function analizar(texto) {
   return _ultimoAnalisis;
 }
 
-function detector(regex, hechoNombre, minimo) {
-  const tope = minimo === undefined ? 0.6 : minimo;
+function detector(regex, hechoNombre, opciones) {
+  const o = opciones || {};
+  const tope = o.minimo === undefined ? 0.6 : o.minimo;
+  // El veto manda sobre los dos pisos. Hace falta porque una expresion suelta
+  // no sabe donde termina la frase: "que sabes de mi" vive dentro de "que
+  // sabes de mi amigo secreto", que es una pregunta COMPLETAMENTE distinta.
+  const veto = o.veto || null;
   return {
     regex,
     hecho: hechoNombre,
     /** Lo dijo, escrito como sea. */
     test(texto) {
+      if (veto && veto.test(texto)) return false;
       if (regex && regex.test(texto)) return true;
       if (!hechoNombre) return false;
       const h = analizar(texto).hechos[hechoNombre];
@@ -143,6 +149,7 @@ function detector(regex, hechoNombre, minimo) {
     },
     /** 0..1: cuanta confianza hay en que lo dijo (1 si engancho el literal). */
     certeza(texto) {
+      if (veto && veto.test(texto)) return 0;
       if (regex && regex.test(texto)) return 1;
       if (!hechoNombre) return 0;
       const h = analizar(texto).hechos[hechoNombre];
@@ -163,9 +170,22 @@ const EQUIVALE = {
   gracias: 'gracias', saludo: 'saludo'
 };
 
+/**
+ * Lo que impide que una entrada se dispare aunque su expresion encaje.
+ *
+ * Todos miran a lo mismo: preguntar por OTRA PERSONA no es preguntar por uno
+ * mismo. "que sabes de mi" y "que sabes de mi amigo secreto" se parecen mucho
+ * por escrito y no tienen nada que ver.
+ */
+const VETOS = {
+  recordar: /\b(mi|su|tu)\s+amig|amig[oa]\s+secret|\bde\s+[a-záéíóúñ]+\s+qu[eé]\s+sabes\b/i,
+  verLista: /\b(mi|su|tu)\s+amig|amig[oa]\s+secret/i,
+  guardar:  /\bqu[eé]\s+(sabes|recuerdas)\b/i
+};
+
 const RX = {};
 for (const nombre of Object.keys(RX_BASE)) {
-  RX[nombre] = detector(RX_BASE[nombre], EQUIVALE[nombre]);
+  RX[nombre] = detector(RX_BASE[nombre], EQUIVALE[nombre], { veto: VETOS[nombre] });
 }
 
 // Dos intenciones que solo existen en el lexico comprensivo: no tienen
@@ -173,6 +193,9 @@ for (const nombre of Object.keys(RX_BASE)) {
 RX.consejo = detector(null, 'consejo');
 RX.triste = detector(null, 'triste');
 RX.feliz = detector(null, 'feliz');
+RX.miAmigo = detector(null, 'miAmigo');
+RX.susto = detector(null, 'susto');
+RX.chiste = detector(null, 'chiste');
 
 
 // --------------------------------------------------------------------------
@@ -344,6 +367,59 @@ function queFalta(persona, deseos) {
     .sort((a, b) => b.valor - a.valor);
 }
 
+/**
+ * Una pregunta NO es un dato sobre quien la hace.
+ *
+ * Parece obvio y sin embargo era el peor fallo del duende: cuando no entendia
+ * algo, lo guardaba en el cuaderno como si fuera una confidencia. Asi acababa
+ * con recuerdos del estilo "DE ELENA VEGA QUE SABES", que encima luego
+ * repetia como si se los hubieran contado.
+ */
+const INTERROGATIVAS = new RegExp(
+  '^(que|quien|quienes|cual|cuales|como|cuando|donde|cuantos|cuantas|cuanto|' +
+  'por que|para que|sabes|conoces|puedes|me puedes|dime|cuentame|hablame)\\b', 'i');
+
+function esPregunta(texto) {
+  const t = String(texto || '').trim();
+  if (!t) return false;
+  if (t.indexOf('?') >= 0 || t.indexOf(String.fromCharCode(191)) >= 0) return true;
+  return INTERROGATIVAS.test(comprension.normalizar(t));
+}
+
+/**
+ * El "quisiste decir..." de cuando no entendio nada.
+ *
+ * Es el mismo KNN sobre texto del modulo 4 de TecniBot: una frase de ejemplo
+ * por intencion, indexadas con TF-IDF de N-GRAMAS DE LETRAS (no de palabras),
+ * que es lo que aguanta que cada quien escriba distinto o con faltas. En vez
+ * de votar una solucion, aqui cada vecino propone una forma de preguntar.
+ */
+const EJEMPLOS = [
+  { frase: 'dame ideas de regalo para mi amigo secreto que le compro', chip: '\u{1F381} Dame ideas' },
+  { frase: 'que sabes de mi amigo secreto que le gusta a quien le regalo', chip: '\u{1F92B} Sobre mi amigo secreto' },
+  { frase: 'quien es esa persona hablame de ella que sabes de ella', chip: '\u{1F464} Háblame de alguien' },
+  { frase: 'quienes estan registrados en el grupo cuantos somos cuantos faltan', chip: '\u{1F465} ¿Quiénes están?' },
+  { frase: 'con quien me parezco mas afinidad cosas en comun', chip: '\u{1F9EE} ¿Con quién me parezco?' },
+  { frase: 'que recuerdas de mi que te dije que tienes anotado mio', chip: '\u{1F9E0} ¿Qué recuerdas de mí?' },
+  { frase: 'guarda esto de mi anota que soy registra este dato', chip: '\u{1F4DD} Guarda esto de mí' },
+  { frase: 'dile a alguien que le mando saludos mandale un recado', chip: '\u{1F48C} Dile algo a alguien' },
+  { frase: 'cuanto es el monto el presupuesto cuanto gastamos el precio', chip: '\u{1F4B0} ¿Cuánto es el monto?' },
+  { frase: 'cuando es la fecha donde es el lugar a que hora', chip: '\u{1F4C5} ¿Cuándo y dónde?' },
+  { frase: 'cuentame algo una historia del taller una reflexion', chip: '\u{1F4AD} Cuéntame algo' },
+  { frase: 'juguemos algo un juego estoy aburrido entretenme', chip: '\u{1F3B2} Juguemos algo' },
+  { frase: 'cuentame un chiste algo gracioso una broma hazme reir', chip: '\u{1F602} Cuéntame un chiste' },
+  { frase: 'dame un consejo que hago que me recomiendas aconsejame', chip: '\u{1F4A1} Dame un consejo' },
+  { frase: 'como funciona esto cuales son las reglas no entiendo ayudame', chip: '\u{2753} ¿Cómo funciona?' }
+];
+
+const INDICE_EJEMPLOS = new nlp.TfIdf({ analizador: 'letra' });
+EJEMPLOS.forEach((e, i) => INDICE_EJEMPLOS.agregar(i, e.frase, e));
+
+/** Las formas de preguntar que mas se parecen a lo que escribio. */
+function quisisteDecir(texto, n) {
+  return INDICE_EJEMPLOS.buscar(texto, n || 3, 0.05).map(x => EJEMPLOS[x.id].chip);
+}
+
 function extraerCosas(texto) {
   const t = String(texto)
     .replace(/.*\b(quiero|quisiera|me gustar[ií]a|me encanta[n]?|me gusta[n]?|me fascina[n]?|s[uú]beme|an[oó]tame|ap[uú]ntame|no me gusta[n]?|odio|detesto|no quiero|no soporto)\b/i, '')
@@ -458,6 +534,43 @@ async function juego(user, gente) {
  * No hay camara ni nada parecido: para el duende "ver" es percibir la pagina
  * y el cursor, que es lo unico que el navegador le deja mirar.
  */
+/**
+ * SUSTOS Y CHISTES
+ *
+ * Frank lo pidio con estas palabras: que de un susto y enseguida diga que
+ * estaba jugando. Por eso SUSTOS y CALMA no se usan nunca por separado: el
+ * susto solo tiene gracia si detras viene el "soy un angel, estoy para
+ * ayudarte".
+ */
+const SUSTOS = [
+  '<b>\u{1F47B} ¡BUUUH!</b>',
+  '<b>\u{1F480} ¡AAAHH, algo se movió detrás de ti!</b>',
+  '<b>\u{26A1} ¡BU! \u{1F631}</b>',
+  '<b>\u{1F576} Psst… mira a tu izquierda… ¡BUUU!</b>',
+  '<b>\u{1F383} ¡AH! …era yo, nada mas \u{1F605}</b>'
+];
+
+const CALMA = [
+  'No te asustes \u{1F49B} solo estoy jugando. Así me programó mi creador: soy un ángel, ' +
+  'así que no me tengas miedo, estoy para ayudarte.',
+  'Ya, ya, era broma \u{1F97A} No te asustes: soy un ángel de taller, y estoy aquí para ayudarte, ' +
+  'no para darte sustos de verdad.',
+  'Tranqui \u{1F970} solo jugaba. Soy un ángel, no me tengas miedo: si necesitas algo, aquí estoy.',
+  'No te asustes, era un juego \u{1F604} Mi creador me hizo para acompañarte, no para espantarte. ' +
+  'Soy un ángel, de los buenos.'
+];
+
+const CHISTES = [
+  '¿Qué le dice un reno a otro? \u{1F98C}<br><i>—Nada, los renos no hablan.</i>',
+  '¿Por qué el árbol de Navidad nunca se estresa? \u{1F384}<br><i>Porque siempre está rodeado de regalos.</i>',
+  'Me preguntaron cuál es mi regalo favorito \u{1F381}<br><i>Dije "el que no hay que armar".</i>',
+  '¿Sabes por qué los duendes somos tan buenos guardando secretos? \u{1F910}<br><i>Porque nadie nos pregunta nada hasta diciembre.</i>',
+  'Mi amigo secreto me regaló una taza \u{2615}<br><i>Y yo que le había pedido vacaciones. Pero bueno, se acordó de mí.</i>',
+  '¿Cómo se despiden dos duendes? \u{1F9DD}<br><i>—Nos vemos en el próximo arbolito.</i>',
+  'Un panetón le dice a otro: \u{1F35E}<br><i>—Oye, ¿tú también sientes que nos regalan sin preguntar?</i>',
+  '¿Qué hace un duende con un celular? \u{1F4F1}<br><i>Buscar ideas de regalo, igual que tú. Pero yo sí te las doy.</i>'
+];
+
 const REACCIONES_GESTO = {
   hover: {
     evento: 'mimo',
@@ -638,6 +751,15 @@ async function responder({ user, amigo, texto, ctx = {}, espera = null }) {
   let r = null;
   let intencion = null;          // para entrenar el clasificador
   let evento = null;             // para la maquina de emociones
+
+  // El duende suele dejar una pregunta abierta ("¿qué canción te suena a
+  // diciembre?"). Si lo siguiente que llega NO es una respuesta sino otra
+  // pregunta, la espera se cae: si no, la pregunta de la persona se guarda
+  // como si fuera la respuesta a la del duende. Eso pasaba de verdad.
+  if (espera && espera.tipo === 'pregunta_duende' && esPregunta(t) &&
+      comprension.intencionPrincipal(comp, 0.6)) {
+    espera = null;
+  }
 
   // "olvida eso que te dije" lleva dentro un "que te dije", que es la misma
   // frase con la que se le pide recordar. Se resuelve una sola vez aqui para
@@ -1003,6 +1125,26 @@ async function responder({ user, amigo, texto, ctx = {}, espera = null }) {
     }
   }
 
+  // ---- 12b. Sustos: jugar y despues tranquilizar -------------------------
+  // Un susto sin el "era broma" detras no es un juego, es un mal rato. Las
+  // dos mitades van siempre juntas en el mismo mensaje.
+  else if (RX.susto.test(t)) {
+    intencion = 'susto';
+    evento = 'travesura';
+    r = salida(
+      alAzar(SUSTOS) + '<br><br>' + alAzar(CALMA),
+      { animacion: 'susto', sugerencias: ['¡Otra vez!', 'Cuéntame un chiste', 'Juguemos algo'] });
+  }
+
+  // ---- 12c. Chistes ------------------------------------------------------
+  else if (RX.chiste.test(t)) {
+    intencion = 'chiste';
+    evento = 'cosquillas';
+    r = salida(
+      alAzar(CHISTES) + '<br><span class="porque">\u{1F9DD} humor de duende, no pido perdón</span>',
+      { animacion: 'risa', sugerencias: ['Otro chiste', 'Asústame', 'Cuéntame algo'] });
+  }
+
   // ---- 13. Juegos --------------------------------------------------------
   else if (RX.juego.test(t)) {
     intencion = 'juego';
@@ -1104,7 +1246,7 @@ async function responder({ user, amigo, texto, ctx = {}, espera = null }) {
   }
 
   // ---- 17. Sobre MI amigo secreto (solo el propio) -----------------------
-  else if ((RX.amigo.test(t) || RX.ideas.test(t)) && amigo) {
+  else if ((RX.amigo.test(t) || RX.ideas.test(t) || RX.miAmigo.test(t)) && amigo) {
     intencion = 'ideas';
     evento = 'pensando';
     const rec = await knn.recomendar(amigo.id, { n: 4 });
@@ -1303,16 +1445,25 @@ async function chatLibre({ user, texto, sent, cp }) {
   const saber = t.length > 10 ? navidad.consultar(t, 1) : [];
 
   // --- 4. aprende de lo que le acaban de decir ---------------------------
-  const cosas = extraerCosas(t);
+  // Pero SOLO de afirmaciones. Antes, al no reconocer nada, extraerCosas()
+  // devolvia la frase entera y el duende la guardaba como un gusto: por eso
+  // acababa apuntando "DE ELENA VEGA QUE SABES" como si se lo hubieran
+  // confiado. Ahora los gustos salen del analisis por clausulas, que solo los
+  // da cuando hay de verdad un "me gusta X" delante.
+  const pregunta = esPregunta(t);
+  const gustos = pregunta ? [] : comprension.extraerGustos(t).filter(g => !META.test(g.valor));
   let aprendido = [];
-  if (cosas.length && t.length < 140) {
-    for (const c of cosas.slice(0, 3)) {
-      await knn.aprender({ usuarioId: user.id, tipo: 'gusta', valor: c, origen: 'chat' });
+  if (gustos.length && t.length < 140) {
+    for (const g of gustos.slice(0, 3)) {
+      await knn.aprender({
+        usuarioId: user.id, tipo: g.tipo, valor: g.valor, origen: 'chat', peso: g.certeza
+      });
     }
-    aprendido = cosas.slice(0, 3);
+    aprendido = gustos.slice(0, 3).map(g => g.valor);
   }
   // si suena a dato sobre si mismo, lo guarda en la memoria larga
-  const esAfirmacion = /\b(soy|tengo|vivo|trabajo|estudio|me llamo|siempre|nunca|suelo|odio|amo|consider)\b/i.test(t);
+  const esAfirmacion = !pregunta &&
+    new RegExp('\\b(soy|tengo|vivo|trabajo|estudio|me llamo|siempre|nunca|suelo|odio|amo|consider)\\b', 'i').test(t);
   if (esAfirmacion && t.length >= 12 && t.length <= 400) {
     await memoria.recordar({ usuarioId: user.id, tipo: 'dato', texto: t, visibilidad: 'privado', animo: sent.valencia });
   }
@@ -1351,18 +1502,31 @@ async function chatLibre({ user, texto, sent, cp }) {
       });
   }
 
-  // --- nada que agarrar: ofrece lo que sabe hacer, preguntando -----------
+  // --- nada que agarrar ---------------------------------------------------
+  // Aqui el duende reconoce que no entendio, que es lo honesto, y en vez de
+  // recitar su menu propone LAS FORMAS DE PREGUNTAR QUE MAS SE PARECEN a lo
+  // que acaba de leer. Si ademas tuvo que corregir ortografia, lo dice.
+  const cercanas = quisisteDecir(t, 3);
+  const nota = notaDeLectura(analizar(t));
+
+  if (cercanas.length) {
+    return salida(
+      'Uff, esa no la pillé \u{1F605} ¿Me quisiste decir alguna de estas?' + nota,
+      { _evento: 'pensando', sugerencias: cercanas.concat(['No, otra cosa']) });
+  }
+
   const q = navidad.pregunta();
   return salida(
     'No te entendí del todo \u{1F605} pero no me quiero quedar callado. Puedo:<br>' +
-    '\u{1F381} darte ideas · \u{1F9EE} decirte con quién te pareces · \u{1F465} contarte del grupo · ' +
-    '\u{1F48C} llevar recados · \u{1F9E0} guardar lo que me cuentes · \u{1F3B2} jugar · \u{1F634} irme a dormir si te molesto' +
+    '\u{1F381} darte ideas \u{00B7} \u{1F9EE} decirte con quién te pareces \u{00B7} \u{1F465} contarte del grupo \u{00B7} ' +
+    '\u{1F48C} llevar recados \u{00B7} \u{1F9E0} guardar lo que me cuentes \u{00B7} \u{1F3B2} jugar \u{00B7} \u{1F634} irme a dormir si te molesto' +
     `<br><br>Mientras: <b>${q.texto}</b>`,
     {
       espera: { tipo: 'pregunta_duende', aprende: q.aprende },
       sugerencias: ['Dame ideas', '¿Quiénes están?', 'Cuéntame algo', 'Juguemos algo']
     });
 }
+
 
 // --------------------------------------------------------------------------
 // Resumen de lo aprendido, para la pantalla de transparencia
@@ -1467,7 +1631,14 @@ async function mensajeEspontaneo(user, ctx = {}) {
     texto: navidad.reflexion()
   });
 
-  // 5. como se siente hoy
+  // 5. una travesura: susto y, pegado, el "era broma". Pesa poco a proposito:
+  // una vez cada tanto hace gracia, cada vez que entras seria pesado.
+  opciones.push({
+    peso: 0.6, tipo: 'susto', clave: 'susto',
+    texto: alAzar(SUSTOS) + '<br><br>' + alAzar(CALMA)
+  });
+
+  // 6. como se siente hoy
   opciones.push({
     peso: 1, tipo: 'animo', clave: 'animo:' + est.estado,
     texto: `Hoy ando <b>${est.etiqueta}</b> ${est.emoji}. ¿Y tú cómo vas?`
