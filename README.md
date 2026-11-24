@@ -78,9 +78,63 @@ Un personaje animado en SVG (camina, saluda, parpadea, le suena el pompón) acom
 - **Se pasea y tiene cosquillas.** Camina y vuela por la página cada cierto rato (se
   queda quieto si el chat está abierto, en móvil o si el sistema pide menos
   movimiento). Tres toques seguidos y se muere de risa.
-- **Nunca revela el sorteo.** No por buena voluntad, sino por construcción: el módulo
-  del duende recibe del servidor **únicamente** la asignación de quien pregunta. Las
-  parejas de los demás no entran nunca en ese código, así que no hay nada que filtrar.
+- **Tiene memoria de corto y largo plazo** (`src/memoria.js`). La corta vive 40 minutos en
+  RAM y guarda el hilo de la charla (de quién hablábamos, el tema, cómo venía el ánimo).
+  La larga va a la tabla `memorias` y guarda lo que la persona le pide expresamente:
+  *«guarda esto de mí: soy hincha de Alianza»*. Tres mecanismos la hacen parecer memoria
+  de verdad y no un baúl:
+  1. **Refuerzo por repetición**: contar dos veces lo mismo no duplica la fila, le sube el peso.
+  2. **Curva de olvido** (Ebbinghaus): la relevancia decae exponencialmente con el tiempo, pero
+     evocar un recuerdo le reinicia el reloj. Lo que se repasa se mantiene fresco.
+  3. **Recuperación por parecido**, no por palabra exacta: *«¿te acuerdas de lo del viaje?»*
+     encuentra *«fuimos a Cusco el año pasado»* (TF-IDF + coseno).
+- **Hace de vocero.** *«si alguien pregunta por mí dile que siempre seré su mejor amigo»* queda
+  guardado como **recado público**, y el duende lo repite —pasado a tercera persona— cuando otro
+  del grupo pregunta por esa persona. Es lo **único** de su memoria que sale de su dueño: todo lo
+  demás está marcado como privado.
+- **Siente** (`src/animo.js`). Lleva tres variables continuas —valencia, energía y ánimo de
+  base— y sobre ellas corre una máquina de estados con diez emociones: contento, feliz, risa,
+  tierno, travieso, sorpresa, pensativo, triste, cansado y dormido. Hay **contagio emocional**:
+  si le escribes triste, baja su valencia, pone cara triste, habla más grave y despacio y te
+  acompaña en vez de venderte un regalo. No finge estar siempre feliz, porque un amigo que solo
+  sabe estar feliz no acompaña en diciembre.
+- **Ve** (`public/js/vision.js`). No hay cámara ni se la pide a nadie: lo que el duende puede
+  mirar es su propia página y el cursor. Con eso **te sigue con los ojos**, nota si te quedas un
+  rato encima de él, y reconoce gestos analizando la trayectoria del mouse —velocidad, cambios
+  de sentido y ángulo acumulado— para distinguir una **caricia** (lenta, de ida y vuelta) de una
+  **sacudida** (rápida) o de una **vuelta** completa a su alrededor. También se da cuenta si te
+  fuiste y si volviste.
+- **Obedece.** *«descansa un rato»* / *«vete a dormir»* y se acurruca con sus zZz (deja de hablar
+  y de pasearse); *«despierta»* o un toque y sale de un salto; *«deja de hablar»* le quita la voz
+  sin quitarle el chat. Los mismos cuatro botones están en el panel.
+- **Sabe del mundo** (`src/navidad.js`). Tiene un corpus propio sobre la Navidad, el amor, la
+  amistad, el recordar y la tristeza de diciembre, indexado con TF-IDF: cuando le hablas de un
+  tema recupera lo que mejor calza en vez de soltar una frase al azar. *«cuéntame algo»* alterna
+  historias del taller, reflexiones y preguntas.
+- **Es preguntón a propósito.** Cada respuesta que recibe es una señal nueva que aprende, así que
+  cuando no tiene nada que decir, pregunta.
+- **Chat libre que piensa en cuatro pasos** (`chatLibre()` en `src/bot.js`): clasifica la
+  intención con **Naive Bayes**, busca en tu memoria algo parecido a lo que acabas de decir,
+  consulta lo que sabe del mundo, y aprende de lo que le contaste. Si nada de eso da pie,
+  improvisa con una **cadena de Markov de orden 2** entrenada *solo* con el corpus público y con
+  tus propias palabras —nunca con las de otros—, de modo que ni improvisando puede delatar a
+  nadie.
+- **Entiende cada vez mejor a ESTE grupo.** Cuando una regla acierta una intención, la frase real
+  se guarda en la tabla `intenciones` y reentrena el clasificador al arrancar. El modelo empieza
+  con ~120 frases semilla y crece con el uso.
+- **Tolera los errores de tipeo** en los nombres: *«dile a Pyña»* encuentra a Piña (distancia de
+  edición de Levenshtein).
+- **Nunca revela el sorteo.** No por buena voluntad, sino por construcción, y ahora con
+  cuatro capas:
+  1. El módulo del duende recibe del servidor **únicamente** la asignación de quien pregunta.
+     Las parejas de los demás no entran nunca en ese código, así que no hay nada que filtrar.
+  2. Los recados entre amigos se revisan antes de entregarse: el que intente destripar el
+     sorteo se bloquea.
+  3. Cada recuerdo tiene `visibilidad`. Lo privado solo se le cuenta a su dueño; a terceros
+     solo se repite lo que la persona marcó para el grupo. Lo que pediste guardar en privado
+     tampoco aparece cuando el duende te describe ante el grupo.
+  4. La cadena de Markov se entrena solo con texto que el destinatario ya puede leer.
+
   A quien insista, lo esquiva con gracia.
 - **Habla.** Tiene voz de duendecito con la síntesis de voz del propio navegador: narra el
   resultado del sorteo, sus avisos y sus respuestas del chat. No usa ningún servicio externo ni
@@ -202,10 +256,20 @@ amigo-secreto/
 ├── src/
 │   ├── db.js              # conexión SQLite/Turso, esquema y configuración
 │   ├── sorteo.js          # algoritmo del sorteo (ciclo único aleatorio)
-│   ├── bot.js             # duende: catálogo de ideas y memoria de deseos
+│   ├── bot.js             # el cerebro del duende: intenciones y conversación
+│   ├── knn.js             # aprendizaje de gustos (k-NN + filtrado colaborativo)
+│   ├── nlp.js             # lenguaje: stemmer, Levenshtein, TF-IDF, Naive Bayes,
+│   │                      #   análisis de sentimiento, Markov y resumen extractivo
+│   ├── memoria.js         # memoria de corto y largo plazo, con curva de olvido
+│   ├── animo.js           # emociones: valencia, energía y máquina de estados
+│   ├── navidad.js         # lo que sabe del mundo: Navidad, amor, amistad, recordar
 │   └── session-store.js   # sesiones guardadas en SQLite
 ├── views/                 # plantillas EJS
-├── public/css|js          # estilos y animaciones (nieve, Papá Noel, confeti)
+├── public/
+│   ├── css/               # estilos, incluido duende-animo.css (las diez caras)
+│   └── js/
+│       ├── duende.js      # el widget: chat, voz, paseo, emociones
+│       └── vision.js      # cognición visual: mirada, gestos del mouse, presencia
 ├── data/amigo_secreto.db  # ← la base de datos (se crea sola)
 └── render.yaml            # despliegue en Render
 ```

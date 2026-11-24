@@ -29,6 +29,11 @@
   let saludado = false;
   let rotador = null;
 
+  // ===== estado emocional del duende (lo decide el servidor, src/animo.js) =====
+  // Se guarda aqui porque manda sobre tres cosas: la cara (data-animo), el
+  // tono de la voz y si se pasea o se queda quietecito durmiendo.
+  let humor = null;
+
   const escapar = (s) => String(s).replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -146,10 +151,27 @@
     procesarCola();
   }
 
+  /**
+   * El tono elegido por el usuario (Duende / Nino / Normal) es la base, y la
+   * emocion lo modula: triste habla mas grave y lento, riendo mas agudo y
+   * rapido. Se mezcla en vez de reemplazar para que la voz siga sonando a la
+   * que la persona escogio.
+   */
+  function tonoConEmocion() {
+    const base = TONOS[tonoActual] || TONOS.duende;
+    if (!humor || !humor.tono) return base;
+    const e = humor.tono;
+    return {
+      pitch: Math.max(0.6, Math.min(2, base.pitch * 0.62 + e.pitch * 0.38)),
+      rate: Math.max(0.5, Math.min(1.6, base.rate * 0.62 + e.rate * 0.38)),
+      etiqueta: base.etiqueta
+    };
+  }
+
   function procesarCola() {
     if (!sintesis || hablando || !cola.length) return;
     const t = cola.shift();
-    const cfg = TONOS[tonoActual] || TONOS.duende;
+    const cfg = tonoConEmocion();
     let u;
     try { u = new SpeechSynthesisUtterance(t); } catch (e) { return; }
     if (vozElegida) { u.voice = vozElegida; u.lang = vozElegida.lang; }
@@ -409,8 +431,8 @@
   /** Chips de sugerencia. El servidor manda las suyas según la conversación. */
   function chips(lista) {
     const porDefecto = estado && estado.amigo
-      ? ['🎁 Dame ideas', '👀 ¿Qué le gusta?', '🧮 ¿Con quién me parezco?', '🎲 Juguemos algo', '💰 El monto']
-      : ['👥 ¿Quiénes están?', '✍️ Quiero pedir algo', '🧮 ¿Con quién me parezco?', '🎲 Juguemos algo', '❓ Cómo funciona'];
+      ? ['🎁 Dame ideas', '👀 ¿Qué le gusta?', '🧮 ¿Con quién me parezco?', '🧠 Guarda esto de mí', '📖 Si alguien pregunta por mí…', '🎲 Juguemos algo', '💭 Cuéntame algo']
+      : ['👥 ¿Quiénes están?', '✍️ Quiero pedir algo', '🧠 Guarda esto de mí', '📖 Si alguien pregunta por mí…', '🧮 ¿Con quién me parezco?', '🎲 Juguemos algo', '💭 Cuéntame algo'];
     const usar = (lista && lista.length) ? lista : porDefecto;
 
     sugerencias.innerHTML = '';
@@ -422,8 +444,12 @@
       b.addEventListener('click', () => {
         // el texto que se envía es la etiqueta sin el emoji inicial
         const limpio = etiqueta.replace(/^[^\w¿¡]+/, '').trim();
-        if (/^(quiero pedir algo|dile a .*)$/i.test(limpio)) {
-          input.value = limpio.toLowerCase().indexOf('dile') === 0 ? limpio.replace(/…$/, ' ') : 'quiero ';
+        if (/^(quiero pedir algo|dile a .*|guarda esto de mí|si alguien pregunta por mí…?)$/i.test(limpio)) {
+          const inicio = limpio.toLowerCase();
+          input.value = inicio.indexOf('dile') === 0 ? limpio.replace(/…$/, ' ')
+            : inicio.indexOf('guarda') === 0 ? 'guarda esto de mí: '
+            : inicio.indexOf('si alguien') === 0 ? 'si alguien pregunta por mí dile que '
+            : 'quiero ';
           input.focus();
           return;
         }
@@ -491,9 +517,15 @@
       const d = await r.json();
       esperando.remove();
       if (d.error) { burbuja('bot', '⚠️ ' + escapar(d.error)); return; }
+      // el animo se aplica ANTES de la burbuja, para que la frase salga ya con
+      // la cara y el tono de voz que le corresponden
+      if (d.animo) aplicarAnimo(d.animo);
+      if (d.callar) silenciarVoz(true);
+      if (d.hablar) silenciarVoz(false);
       burbuja('bot', d.reply);
       if (d.espera) esperaActual = d.espera;
       if (d.animacion === 'cosquillas') reir();
+      if (d.animacion === 'volar') volar();
       if (d.ideas) botonesIdea(d.ideas);
       chips(d.sugerencias);
     } catch (e) {
@@ -523,7 +555,12 @@
     reconocedor.continuous = false;
     reconocedor.maxAlternatives = 1;
 
-    reconocedor.onstart = () => { oyendo = true; btnMic.classList.add('oyendo'); input.placeholder = 'Te escucho…'; };
+    reconocedor.onstart = () => {
+      oyendo = true;
+      btnMic.classList.add('oyendo');
+      widget.classList.add('oyendo-mic');          // abre mas los ojos: esta atento
+      input.placeholder = 'Te escucho…';
+    };
     reconocedor.onresult = (ev) => {
       let texto = '';
       for (let i = ev.resultIndex; i < ev.results.length; i++) texto += ev.results[i][0].transcript;
@@ -535,13 +572,19 @@
     };
     reconocedor.onerror = (ev) => {
       btnMic.classList.remove('oyendo');
+      widget.classList.remove('oyendo-mic');
       oyendo = false;
       input.placeholder = 'Escribe aquí…';
       if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
         burbuja('bot', '🎤 No me diste permiso para el micrófono. Puedes activarlo en el candado de la barra de direcciones.');
       }
     };
-    reconocedor.onend = () => { oyendo = false; btnMic.classList.remove('oyendo'); input.placeholder = 'Escribe aquí…'; };
+    reconocedor.onend = () => {
+      oyendo = false;
+      btnMic.classList.remove('oyendo');
+      widget.classList.remove('oyendo-mic');
+      input.placeholder = 'Escribe aquí…';
+    };
 
     btnMic.addEventListener('click', () => {
       if (!reconocedor) return;
@@ -590,6 +633,7 @@
     if (quietoPorPreferencia) return;
     if (panel.classList.contains('abierto')) return;      // no estorbar el chat
     if (document.hidden) return;
+    if (humor && humor.dormido) return;                   // durmiendo no camina
 
     // el widget está anclado abajo a la derecha: los desplazamientos son
     // negativos para moverse hacia la izquierda y hacia arriba
@@ -599,13 +643,19 @@
     const y = -Math.round(Math.random() * maxY * 0.65);
     const vuela = Math.random() < 0.4;
 
+    // la direccion decide si el muneco se da la vuelta para mirar hacia donde
+    // va; con las piernas moviendose, eso es lo que lo hace parecer caminar
+    const xPrevio = parseFloat((widget.style.transform.match(/translate\((-?[\d.]+)px/) || [0, 0])[1]) || 0;
+    widget.classList.toggle('mira-izq', x < xPrevio - 12);
     widget.classList.toggle('volando', vuela);
+    widget.classList.toggle('caminando', !vuela);
     widget.classList.add('paseando');
     widget.style.transform = `translate(${x}px, ${y}px)`;
 
     // al llegar, a veces comenta algo
     setTimeout(() => {
       widget.classList.remove('volando');
+      widget.classList.remove('caminando');
       if (Math.random() < 0.45 && !panel.classList.contains('abierto')) {
         const frases = avisos();
         if (frases.length) decir(frases[Math.floor(Math.random() * frases.length)], 6000);
@@ -615,7 +665,14 @@
 
   function volverASuSitio() {
     widget.style.transform = '';
-    widget.classList.remove('volando');
+    widget.classList.remove('volando', 'caminando', 'mira-izq');
+  }
+
+  /** Un vuelo corto: cuando sale a entregar un recado o cuando despierta. */
+  function volar() {
+    if (quietoPorPreferencia) return;
+    widget.classList.add('volando');
+    setTimeout(() => widget.classList.remove('volando'), 2600);
   }
 
   function arrancarPaseo() {
@@ -693,12 +750,104 @@
     window.abrirDuende('¿Qué le regalo a mi amigo secreto?');
   });
 
+  // ==========================================================
+  //  EMOCIONES, DESCANSO Y PUENTE CON vision.js
+  // ==========================================================
+  const humorCara = $('#duende-humor-cara');
+  const humorTxt = $('#duende-humor-txt');
+  const humorPila = $('#duende-humor-pila');
+
+  function pintarHumor() {
+    if (!humor) return;
+    if (humorCara) humorCara.textContent = humor.emoji || '\u{1F9DD}';
+    if (humorTxt) {
+      humorTxt.textContent = humor.dormido ? 'durmiendo'
+        : humor.callado ? (humor.etiqueta || 'tranquilo') + ' · sin voz'
+        : (humor.etiqueta || 'en línea');
+    }
+    if (humorPila) humorPila.style.width = Math.round((humor.energia || 1) * 100) + '%';
+  }
+
+  /**
+   * Aplica el estado emocional que llega del servidor: la cara (via el
+   * atributo data-animo, que lee duende-animo.css), la voz y la conducta.
+   */
+  function aplicarAnimo(a) {
+    if (!a || !a.estado) return;
+    humor = a;
+    widget.dataset.animo = a.estado;
+    pintarHumor();
+    // si le pidieron callarse, se respeta aunque el boton estuviera activo
+    if (a.callado && vozActiva) silenciarVoz(true);
+    if (a.dormido) { callar(); volverASuSitio(); }
+  }
+
+  /** Enciende o apaga la voz, dejando el boton y la preferencia al dia. */
+  function silenciarVoz(mudo) {
+    vozActiva = !mudo;
+    guardarPref(VOZ_KEY, vozActiva ? '1' : '0');
+    pintarBotonVoz();
+    if (mudo) callar(); else desbloquear();
+  }
+
+  /** Botones de descanso del panel: dormir, despertar, callar, hablar. */
+  async function ordenar(accion) {
+    try {
+      const r = await fetch('/api/duende/estado', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-csrf-token': window.CSRF },
+        body: JSON.stringify({ accion: accion, _csrf: window.CSRF })
+      });
+      const d = await r.json();
+      if (!d.ok) return;
+      if (accion === 'callar') silenciarVoz(true);
+      if (accion === 'hablar') silenciarVoz(false);
+      aplicarAnimo(d.animo);
+      const dicho = {
+        dormir: 'Zzz… \u{1F634} me acurruco. Llámame cuando quieras.',
+        despertar: '¡Aquí estoy! \u{1F9DD} Dormí rico.',
+        callar: 'Listo, me callo \u{1F910} Sigo escribiendo.',
+        hablar: '¡Ya puedo hablar otra vez! \u{1F50A}'
+      }[accion];
+      if (dicho) {
+        if (panel.classList.contains('abierto')) burbuja('bot', dicho); else decir(dicho, 4200);
+        if (accion === 'despertar') volar();
+      }
+    } catch (e) { /* sin conexion: no pasa nada */ }
+  }
+
+  document.querySelectorAll('[data-duende-accion]').forEach(b => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      ordenar(b.getAttribute('data-duende-accion'));
+    });
+  });
+
+  /**
+   * Puente que consume vision.js: le deja pintar la cara, sacar un globo,
+   * hablar, reir y preguntar si conviene interrumpir.
+   */
+  window.Duende = {
+    aplicarAnimo: aplicarAnimo,
+    decir: decir,
+    hablar: hablar,
+    reir: reir,
+    abierto: () => panel.classList.contains('abierto'),
+    dormido: () => !!(humor && humor.dormido),
+    humor: () => humor
+  };
+
   // -------------------------------------------------- arranque
   fetch('/api/estado', { headers: { accept: 'application/json' } })
     .then(r => r.ok ? r.json() : null)
     .then(d => {
       if (!d) return;
       estado = d;
+      // el duende aparece con la cara con la que se quedo la ultima vez
+      if (estado.animo) aplicarAnimo(estado.animo);
+      if (estado.animo && estado.animo.dormido) {
+        setTimeout(() => decir('Zzz… 😴 tócame o dime <b>despierta</b>', 6000), 2000);
+      }
       if (estado.amigo && !estado.visto) {
         setTimeout(() => mostrarSorpresa(estado.amigo), 850);
         punto.classList.add('ver');

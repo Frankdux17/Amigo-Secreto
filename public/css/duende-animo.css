@@ -1,0 +1,182 @@
+/* ==========================================================
+   LA CARA DEL DUENDE
+   El servidor decide la emocion (src/animo.js) y el navegador la pinta.
+   El estado llega como data-animo="feliz|triste|risa|dormido|..." en
+   #duende-widget, y aqui se enciende el gesto que toca.
+   ========================================================== */
+
+/* ---------- todo lo gestual, apagado por defecto ---------- */
+.b-risa, .b-triste, .b-o, .b-linea, .b-travieso,
+.d-ojos-cerrados, .d-cejas, .d-lagrima, .d-zzz { opacity: 0; }
+.b-sonrisa, .d-ojos-abiertos { opacity: 1; }
+
+.d-boca > *, .d-ojos-abiertos, .d-ojos-cerrados,
+.d-cejas, .d-lagrima, .d-zzz, .d-rubor {
+  transition: opacity .28s ease;
+}
+
+/* Las pupilas siguen el cursor: vision.js escribe --px/--py en el widget y
+   las dos copias del muneco (el grande y el mini del panel) las heredan.
+   Se usa una variable y no un transform inline para que la mirada se pueda
+   COMBINAR con el gesto de cada emocion, en vez de pisarlo. */
+.d-pupilas {
+  transform: translate(var(--px, 0px), var(--py, 0px));
+  transform-origin: 60px 39.4px;
+  transition: transform .13s ease-out;
+}
+
+/* ---------- FELIZ ---------- */
+.duende-widget[data-animo="feliz"] .d-rubor { opacity: 1; }
+.duende-widget[data-animo="feliz"] .duende-lanzador { animation: animo-brinco 1.4s ease-in-out infinite; }
+@keyframes animo-brinco {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-5px); }
+}
+
+/* ---------- RISA ---------- */
+.duende-widget[data-animo="risa"] .b-sonrisa { opacity: 0; }
+.duende-widget[data-animo="risa"] .b-risa { opacity: 1; }
+.duende-widget[data-animo="risa"] .d-ojos-abiertos { opacity: 0; }
+.duende-widget[data-animo="risa"] .d-ojos-cerrados { opacity: 1; }
+.duende-widget[data-animo="risa"] .d-rubor { opacity: 1; }
+
+/* ---------- TIERNO (le hicieron cariño) ---------- */
+.duende-widget[data-animo="tierno"] .d-ojos-abiertos { opacity: 0; }
+.duende-widget[data-animo="tierno"] .d-ojos-cerrados { opacity: 1; }
+.duende-widget[data-animo="tierno"] .d-rubor { opacity: 1; }
+.duende-widget[data-animo="tierno"] .d-cabeza { animation: animo-ladea 2.4s ease-in-out infinite; }
+@keyframes animo-ladea {
+  0%, 100% { transform: rotate(0); }
+  50%      { transform: rotate(-7deg); }
+}
+
+/* ---------- TRAVIESO ---------- */
+.duende-widget[data-animo="travieso"] .b-sonrisa { opacity: 0; }
+.duende-widget[data-animo="travieso"] .b-travieso { opacity: 1; }
+
+/* ---------- SORPRESA ---------- */
+.duende-widget[data-animo="sorpresa"] .b-sonrisa { opacity: 0; }
+.duende-widget[data-animo="sorpresa"] .b-o { opacity: 1; }
+.duende-widget[data-animo="sorpresa"] .d-pupilas { transform: translate(var(--px, 0px), var(--py, 0px)) scale(1.3); }
+.duende-widget[data-animo="sorpresa"] .duende-lanzador { animation: animo-salto .45s ease-out 2; }
+@keyframes animo-salto {
+  0%, 100% { transform: translateY(0) scale(1); }
+  35%      { transform: translateY(-9px) scale(1.05); }
+}
+
+/* ---------- PENSATIVO ---------- */
+.duende-widget[data-animo="pensativo"] .b-sonrisa { opacity: 0; }
+.duende-widget[data-animo="pensativo"] .b-linea { opacity: 1; }
+.duende-widget[data-animo="pensativo"] .d-cejas { opacity: 1; }
+/* mira hacia arriba, como quien busca algo en la memoria */
+.duende-widget[data-animo="pensativo"] .d-pupilas { transform: translate(var(--px, 0px), calc(var(--py, 0px) - 1.6px)); }
+
+/* ---------- TRISTE ---------- */
+.duende-widget[data-animo="triste"] .b-sonrisa { opacity: 0; }
+.duende-widget[data-animo="triste"] .b-triste { opacity: 1; }
+.duende-widget[data-animo="triste"] .d-cejas { opacity: 1; }
+.duende-widget[data-animo="triste"] .d-rubor { opacity: .35; }
+.duende-widget[data-animo="triste"] .d-lagrima { opacity: 1; animation: animo-lagrima 3.2s ease-in infinite; }
+.duende-widget[data-animo="triste"] .d-cabeza { transform: rotate(4deg); }
+.duende-widget[data-animo="triste"] .d-pupilas { transform: translate(var(--px, 0px), calc(var(--py, 0px) + 1.4px)); }
+@keyframes animo-lagrima {
+  0%       { opacity: 0; transform: translateY(0) scale(.6); }
+  25%      { opacity: 1; transform: translateY(0) scale(1); }
+  85%      { opacity: .9; transform: translateY(13px) scale(.9); }
+  100%     { opacity: 0; transform: translateY(17px) scale(.5); }
+}
+
+/* ---------- CANSADO ---------- */
+.duende-widget[data-animo="cansado"] .b-sonrisa { opacity: 0; }
+.duende-widget[data-animo="cansado"] .b-linea { opacity: 1; }
+.duende-widget[data-animo="cansado"] .d-cejas { opacity: 1; }
+.duende-widget[data-animo="cansado"] .d-ojos-abiertos { opacity: .45; }
+.duende-widget[data-animo="cansado"] .duende-lanzador { animation: animo-cabecea 3.4s ease-in-out infinite; }
+@keyframes animo-cabecea {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  50%      { transform: translateY(3px) rotate(-3deg); }
+}
+
+/* ---------- DORMIDO ---------- */
+.duende-widget[data-animo="dormido"] .b-sonrisa,
+.duende-widget[data-animo="dormido"] .d-ojos-abiertos,
+.duende-widget[data-animo="dormido"] .d-rubor { opacity: 0; }
+.duende-widget[data-animo="dormido"] .d-ojos-cerrados,
+.duende-widget[data-animo="dormido"] .b-linea { opacity: 1; }
+.duende-widget[data-animo="dormido"] .d-zzz { opacity: 1; }
+.duende-widget[data-animo="dormido"] .d-zzz .z1 { animation: animo-zzz 2.4s ease-out infinite; }
+.duende-widget[data-animo="dormido"] .d-zzz .z2 { animation: animo-zzz 2.4s ease-out .5s infinite; }
+.duende-widget[data-animo="dormido"] .d-zzz .z3 { animation: animo-zzz 2.4s ease-out 1s infinite; }
+@keyframes animo-zzz {
+  0%   { opacity: 0; transform: translate(0, 4px) scale(.7); }
+  35%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(6px, -14px) scale(1.15); }
+}
+/* respira despacio y deja de mover las piernas */
+.duende-widget[data-animo="dormido"] .duende-lanzador { animation: animo-respira 4.2s ease-in-out infinite; }
+.duende-widget[data-animo="dormido"] .d-pierna-i,
+.duende-widget[data-animo="dormido"] .d-pierna-d,
+.duende-widget[data-animo="dormido"] .d-brazo,
+.duende-widget[data-animo="dormido"] .duende-ondas { animation: none; }
+.duende-widget[data-animo="dormido"] .duende-aura { opacity: .25; }
+@keyframes animo-respira {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.035); }
+}
+/* dormido no estorba: se hace chiquito y transparente */
+.duende-widget[data-animo="dormido"] .duende-lanzador { opacity: .72; }
+.duende-widget[data-animo="dormido"]:hover .duende-lanzador { opacity: 1; }
+
+/* ---------- CAMINAR ----------
+   El duende se desplaza con translate (duende-vida.css). Aqui solo se le da
+   la vuelta para que mire hacia donde va, y se le aceleran las piernas. */
+.duende-widget.mira-izq .duende { transform: scaleX(-1); }
+.duende-widget.caminando .d-pierna-i,
+.duende-widget.caminando .d-pierna-d { animation-duration: .3s; }
+.duende-widget .duende { transition: transform .3s ease; }
+
+/* ---------- MICROFONO ESCUCHANDO: el duende presta atencion ---------- */
+.duende-widget.oyendo-mic .d-pupilas { transform: translate(var(--px, 0px), var(--py, 0px)) scale(1.18); }
+
+/* ---------- INDICADOR DE ESTADO EN EL PANEL ---------- */
+.duende-humor {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: .72rem; color: var(--texto-2);
+}
+.duende-humor .cara { font-size: .95rem; line-height: 1; }
+.duende-humor .pila {
+  width: 34px; height: 5px; border-radius: 3px; overflow: hidden;
+  background: rgba(255, 255, 255, .14);
+}
+.duende-humor .pila i {
+  display: block; height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, #f4c44b, #37a05c);
+  transition: width .5s ease;
+}
+
+/* ---------- BOTONES DE DESCANSO EN EL PANEL ---------- */
+.duende-acciones {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  padding: 6px 12px 0;
+}
+.duende-acciones button {
+  border: 1px solid var(--borde); background: rgba(255, 255, 255, .06);
+  color: var(--texto-2); cursor: pointer; font-size: .72rem;
+  padding: 4px 9px; border-radius: 999px;
+  transition: background .15s, color .15s, transform .15s;
+}
+.duende-acciones button:hover {
+  background: rgba(255, 255, 255, .16); color: var(--texto); transform: translateY(-1px);
+}
+
+/* ---------- RESPETO POR QUIEN PREFIERE MENOS MOVIMIENTO ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .duende-widget[data-animo] .duende-lanzador,
+  .duende-widget[data-animo] .d-cabeza,
+  .duende-widget[data-animo="triste"] .d-lagrima,
+  .duende-widget[data-animo="dormido"] .d-zzz .z1,
+  .duende-widget[data-animo="dormido"] .d-zzz .z2,
+  .duende-widget[data-animo="dormido"] .d-zzz .z3 { animation: none; }
+  .d-pupilas { transition: none; }
+  .duende-widget .duende { transition: none; }
+}

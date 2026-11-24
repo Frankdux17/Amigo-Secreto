@@ -12,6 +12,8 @@ const SqliteStore = require('./src/session-store');
 const sorteo = require('./src/sorteo');
 const bot = require('./src/bot');
 const knn = require('./src/knn');
+const animo = require('./src/animo');
+const memoriaDuende = require('./src/memoria');
 
 const app = express();
 const PORT = process.env.PORT || 3600;
@@ -429,7 +431,9 @@ app.get('/api/estado', pedirLogin, A(async (req, res) => {
     visto: a ? !!a.visto : false,
     evento: { monto: getConfig('monto'), fecha: getConfig('fecha_evento'), lugar: getConfig('lugar') },
     amigo,
-    recados
+    recados,
+    // estado emocional del duende con esta persona: la cara que pone al entrar
+    animo: await animo.estado(yo.id)
   });
 }));
 
@@ -461,8 +465,76 @@ app.post('/api/bot', pedirLogin, A(async (req, res) => {
     espera: r.espera || null,
     animacion: r.animacion || null,
     ideas: r.ideas || null,
+    // el animo decide la cara y el tono de voz del duende
+    animo: r.animo || null,
+    callar: !!r.callar,
+    hablar: !!r.hablar,
     deseos: await bot.deseosDe(yo.id)
   });
+}));
+
+
+// ------------------------------------------------------------
+//  Cognicion visual: lo que el duende "ve" en la pagina
+//
+//  El navegador le avisa cuando el mouse se queda encima de el, cuando lo
+//  acarician, lo sacuden o cuando llevas rato sin moverte. Eso se traduce en
+//  emocion y en una frase. No hay camara: "ver" es percibir la pagina.
+// ------------------------------------------------------------
+const GESTOS_VALIDOS = new Set(['hover', 'caricia', 'cosquillas', 'sacudida', 'vuelta', 'ausencia', 'regreso']);
+
+app.post('/api/gesto', pedirLogin, A(async (req, res) => {
+  const gesto = String(req.body.gesto || '').trim();
+  if (!GESTOS_VALIDOS.has(gesto)) return res.status(400).json({ error: 'Gesto no reconocido.' });
+  const r = await bot.reaccionarGesto(req.yo.id, gesto, limpiar(req.body.dato || ''));
+  if (!r) return res.status(400).json({ error: 'Gesto no reconocido.' });
+  res.json({ ok: true, ...r });
+}));
+
+
+// ------------------------------------------------------------
+//  Memoria del duende (solo la propia: nadie ve la de otro)
+// ------------------------------------------------------------
+
+// Lo que el duende recuerda de mi, con su estado de animo y su modelo.
+app.get('/api/memoria', pedirLogin, A(async (req, res) => {
+  res.json({ ok: true, ...(await bot.loQueSeDeTi(req.yo.id)) });
+}));
+
+// Guardar algo a mano, sin pasar por el chat.
+app.post('/api/memoria', pedirLogin, A(async (req, res) => {
+  const texto = limpiar(req.body.texto);
+  if (!texto || texto.length < 3) return res.status(400).json({ error: 'Escribe lo que quieres que recuerde.' });
+  if (bot.revelaSorteo(texto)) {
+    return res.status(400).json({ error: 'Eso revelaria el sorteo 🤐 El duende no lo guarda.' });
+  }
+  // 'grupo' = el duende lo puede repetir si alguien pregunta por mi
+  const publico = req.body.visibilidad === 'grupo';
+  const r = await memoriaDuende.recordar({
+    usuarioId: req.yo.id, autorId: req.yo.id,
+    tipo: publico ? 'recado_publico' : 'dato',
+    texto, visibilidad: publico ? 'grupo' : 'privado'
+  });
+  if (!r.ok) return res.status(400).json({ error: 'No se pudo guardar.' });
+  res.json({ ok: true, reforzado: !!r.reforzado });
+}));
+
+// Olvidar un recuerdo propio.
+app.post('/api/memoria/:id/olvidar', pedirLogin, A(async (req, res) => {
+  const ok = await memoriaDuende.olvidar(Number(req.params.id), req.yo.id);
+  res.json({ ok });
+}));
+
+// Mandarlo a dormir / despertarlo / callarlo desde la interfaz.
+app.post('/api/duende/estado', pedirLogin, A(async (req, res) => {
+  const accion = String(req.body.accion || '');
+  let est;
+  if (accion === 'dormir') est = await animo.dormir(req.yo.id);
+  else if (accion === 'despertar') est = await animo.despertar(req.yo.id);
+  else if (accion === 'callar') est = await animo.callar(req.yo.id, true);
+  else if (accion === 'hablar') est = await animo.callar(req.yo.id, false);
+  else return res.status(400).json({ error: 'Accion no valida.' });
+  res.json({ ok: true, animo: est });
 }));
 
 
@@ -648,7 +720,12 @@ app.post('/admin/usuario/nuevo', pedirLogin, pedirAdmin, A(async (req, res) => {
 
 // ------------------------------------------------------------
 app.get('/api/aprendizaje', pedirLogin, A(async (req, res) => {
-  res.json({ ok: true, ...(await knn.estadisticas()) });
+  res.json({
+    ok: true,
+    ...(await knn.estadisticas()),
+    // lo que sabe de QUIEN pregunta, nunca de otro
+    mio: await bot.loQueSeDeTi(req.yo.id)
+  });
 }));
 
 app.get('/salud', A(async (req, res) => {
@@ -667,6 +744,12 @@ app.use((err, req, res, next) => {
 
 // ------------------------------------------------------------
 init()
+  // el duende recupera lo que aprendio en sesiones anteriores: su clasificador
+  // de intenciones se reentrena con las frases reales de este grupo
+  .then(async () => {
+    const n = await bot.cargarAprendizaje();
+    if (n) console.log(`  🧠 Duende: ${n} frase(s) de entrenamiento recuperadas`);
+  })
   .then(() => {
     app.listen(PORT, () => {
       console.log('');

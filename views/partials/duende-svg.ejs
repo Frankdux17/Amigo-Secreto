@@ -1,3 +1,11 @@
+<%#
+  EL CUERPO DEL DUENDE
+  Todas las piezas de la cara viven aqui, apagadas con opacity desde
+  duende-animo.css. El estado emocional se pone en el widget como
+  data-animo="feliz|triste|risa|dormido|..." y el CSS decide que gesto
+  se enciende. Las pupilas van en su propio grupo (.d-pupilas) porque el
+  JS de vision.js las mueve para que el duende siga el cursor con la mirada.
+-%>
 <svg class="duende" viewBox="0 0 120 140" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <g class="d-cuerpo">
     <!-- piernas -->
@@ -42,23 +50,65 @@
       <!-- orejas puntiagudas -->
       <path d="M38 38l-8-5 3 11z" fill="#ffd9b8"/>
       <path d="M82 38l8-5-3 11z" fill="#ffd9b8"/>
-      <!-- ojos -->
-      <g class="d-ojos">
-        <ellipse cx="52" cy="39" rx="3.2" ry="3.6" fill="#22304f"/>
-        <ellipse cx="68" cy="39" rx="3.2" ry="3.6" fill="#22304f"/>
-        <circle cx="53.2" cy="37.8" r="1.1" fill="#fff"/>
-        <circle cx="69.2" cy="37.8" r="1.1" fill="#fff"/>
+
+      <!-- ============ OJOS ============ -->
+      <!-- abiertos: blanco fijo + pupilas que se mueven -->
+      <g class="d-ojos-abiertos">
+        <ellipse cx="52" cy="39.4" rx="4.8" ry="5.2" fill="#fff"/>
+        <ellipse cx="68" cy="39.4" rx="4.8" ry="5.2" fill="#fff"/>
+        <g class="d-pupilas">
+          <ellipse cx="52" cy="39.4" rx="3.1" ry="3.5" fill="#22304f"/>
+          <ellipse cx="68" cy="39.4" rx="3.1" ry="3.5" fill="#22304f"/>
+          <circle cx="53.1" cy="38.2" r="1.05" fill="#fff"/>
+          <circle cx="69.1" cy="38.2" r="1.05" fill="#fff"/>
+        </g>
       </g>
-      <!-- mejillas y sonrisa -->
-      <ellipse cx="46" cy="47" rx="4.5" ry="3" fill="#ff9aa6" opacity=".75"/>
-      <ellipse cx="74" cy="47" rx="4.5" ry="3" fill="#ff9aa6" opacity=".75"/>
-      <path d="M53 49q7 6 14 0" stroke="#22304f" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+      <!-- cerrados: para dormir, reír o recibir cariño -->
+      <g class="d-ojos-cerrados">
+        <path d="M47.5 39.5q4.5 4 9 0" stroke="#22304f" stroke-width="2.1" fill="none" stroke-linecap="round"/>
+        <path d="M63.5 39.5q4.5 4 9 0" stroke="#22304f" stroke-width="2.1" fill="none" stroke-linecap="round"/>
+      </g>
+      <!-- cejas caídas: tristeza, cansancio, estar pensando -->
+      <g class="d-cejas">
+        <path d="M47 34.2q4.5-2.6 9 .6" stroke="#9a6336" stroke-width="1.9" fill="none" stroke-linecap="round"/>
+        <path d="M64 34.8q4.5-3.2 9-.6" stroke="#9a6336" stroke-width="1.9" fill="none" stroke-linecap="round"/>
+      </g>
+      <!-- lágrima -->
+      <g class="d-lagrima">
+        <ellipse cx="49.5" cy="46" rx="1.9" ry="2.9" fill="#79c0ff"/>
+        <circle cx="48.9" cy="45.1" r=".7" fill="#dff0ff"/>
+      </g>
+
+      <!-- mejillas -->
+      <ellipse class="d-rubor" cx="46" cy="47" rx="4.5" ry="3" fill="#ff9aa6" opacity=".75"/>
+      <ellipse class="d-rubor" cx="74" cy="47" rx="4.5" ry="3" fill="#ff9aa6" opacity=".75"/>
+
+      <!-- ============ BOCAS ============ -->
+      <!-- una por emoción; el CSS enciende la que toca -->
+      <g class="d-boca">
+        <path class="b-sonrisa" d="M53 49q7 6 14 0" stroke="#22304f" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+        <g class="b-risa">
+          <path d="M51 48q9 12 18 0z" fill="#22304f"/>
+          <path d="M57 56q3 4 6 0z" fill="#ff7f8f"/>
+        </g>
+        <path class="b-triste" d="M53 53q7-6 14 0" stroke="#22304f" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+        <ellipse class="b-o" cx="60" cy="50.5" rx="3.6" ry="4.6" fill="#22304f"/>
+        <path class="b-linea" d="M55.5 50.5h9" stroke="#22304f" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+        <path class="b-travieso" d="M52.5 49.5q8 5.5 15-2" stroke="#22304f" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+      </g>
 
       <!-- gorro -->
       <path d="M38 27c4-12 40-12 44 0z" fill="#c81f32"/>
       <path d="M80 26c10-4 18 2 16 10-2 7-10 8-14 4" fill="#e63946"/>
       <circle class="d-pompon" cx="98" cy="38" r="7" fill="#fff"/>
       <rect x="36" y="24" width="48" height="8" rx="4" fill="#fff"/>
+    </g>
+
+    <!-- zZz mientras duerme -->
+    <g class="d-zzz" font-family="Georgia, serif" font-weight="700" fill="#cfe3ff">
+      <text class="z1" x="86" y="22" font-size="11">z</text>
+      <text class="z2" x="94" y="14" font-size="9">z</text>
+      <text class="z3" x="100" y="7" font-size="7">z</text>
     </g>
   </g>
 </svg>

@@ -42,7 +42,11 @@
       <div class="duende-mini"><%- include('duende-svg') %></div>
       <div style="flex:1">
         <b>Duende Ayudante</b>
-        <div class="estado-on">en línea · experto en regalos</div>
+        <div class="duende-humor" title="Cómo se siente el duende y cuánta cuerda le queda">
+          <span class="cara" id="duende-humor-cara">🧝</span>
+          <span id="duende-humor-txt">en línea</span>
+          <span class="pila"><i id="duende-humor-pila" style="width:100%"></i></span>
+        </div>
       </div>
       <button class="duende-ajustes" id="voz-ajustes" type="button" title="Ajustar la voz" aria-label="Ajustar la voz">⚙</button>
       <button class="duende-cerrar" id="duende-cerrar" aria-label="Cerrar">×</button>
@@ -59,6 +63,13 @@
       <button class="voz-probar" id="voz-probar" type="button">▶ Probar la voz</button>
       <span class="voz-estado" id="voz-estado"></span>
       <span class="voz-nota">Si no oyes nada: sube el volumen y vuelve a pulsar «Probar». Tu elección queda guardada.</span>
+    </div>
+
+    <div class="duende-acciones">
+      <button type="button" data-duende-accion="dormir" title="Que descanse un rato">😴 Descansa</button>
+      <button type="button" data-duende-accion="despertar" title="Llamarlo">☀️ Despierta</button>
+      <button type="button" data-duende-accion="callar" title="Que no hable en voz alta">🤫 No hables</button>
+      <button type="button" data-duende-accion="hablar" title="Que vuelva a hablar">🔊 Habla</button>
     </div>
 
     <div class="duende-msjs" id="duende-msjs"></div>
@@ -96,5 +107,6 @@
 <script>window.CSRF = '<%= csrfToken %>'; window.HAY_SESION = <%= yo ? 'true' : 'false' %>;</script>
 <script src="/js/app.js?v=<%= build %>"></script>
 <script src="/js/duende.js?v=<%= build %>"></script>
+<script src="/js/vision.js?v=<%= build %>"></script>
 </body>
 </html>

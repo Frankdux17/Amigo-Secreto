@@ -4,56 +4,98 @@
  *  EL DUENDE AYUDANTE
  * ============================================================================
  *
- *  Un asistente que conversa, aprende y hace de mensajero entre los amigos.
- *  Apoyado en src/knn.js para la parte de aprendizaje (k-NN + filtrado
- *  colaborativo) y en unas cuantas reglas para entender la intención.
+ *  Un asistente que conversa, siente, recuerda y hace de mensajero entre los
+ *  amigos. Se apoya en cinco modulos:
  *
- *  REGLA DE ORO, POR ENCIMA DE TODO LO DEMÁS
+ *    knn.js      aprendizaje de gustos (k-NN + filtrado colaborativo)
+ *    nlp.js      lenguaje y pensamiento (Naive Bayes, TF-IDF, sentimiento...)
+ *    memoria.js  memoria de corto y largo plazo, con curva de olvido
+ *    animo.js    emociones (valencia, energia, maquina de estados)
+ *    navidad.js  lo que sabe del mundo: Navidad, amor, amistad, recordar
+ *
+ *  REGLA DE ORO, POR ENCIMA DE TODO LO DEMAS
  *  -----------------------------------------
- *  El duende JAMÁS revela a quién le tocó quién. Ni el del que pregunta a
- *  otro, ni el de un tercero, ni por aproximación ("¿le tocó alguien de
- *  Lima?"), ni jugando, ni aunque se lo pidan de mil formas.
+ *  El duende JAMAS revela a quien le toco quien. Ni el del que pregunta a
+ *  otro, ni el de un tercero, ni por aproximacion, ni jugando, ni aunque se
+ *  lo pidan de mil formas.
  *
- *  Esto no se confía a que el modelo "se porte bien": está garantizado por
- *  construcción. El duende recibe del servidor ÚNICAMENTE la asignación de
- *  quien está preguntando (el parámetro `amigo`). Las parejas de los demás
- *  no entran nunca en este módulo, así que no hay nada que se pueda filtrar
- *  aunque una respuesta saliera mal redactada. Y, por si acaso, los recados
- *  que un amigo manda a otro se revisan antes de entregarse: si alguien
- *  intenta usar al duende para contar a quién le tocó, el recado se bloquea.
+ *  Esto no se confia a que se "porte bien": esta garantizado por
+ *  construccion. El duende recibe del servidor UNICAMENTE la asignacion de
+ *  quien esta preguntando (el parametro `amigo`). Las parejas de los demas no
+ *  entran nunca en este modulo, asi que no hay nada que se pueda filtrar
+ *  aunque una respuesta saliera mal redactada.
+ *
+ *  Tres capas mas de guarda, ahora que tambien tiene memoria:
+ *    - Los recados entre amigos se revisan antes de entregarse.
+ *    - La memoria tiene `visibilidad`: lo privado solo se le cuenta a su
+ *      dueno; a terceros solo se repite lo que la persona marco para el grupo.
+ *    - La cadena de Markov que usa para improvisar se entrena SOLO con el
+ *      corpus publico y con las palabras del propio usuario, nunca con las de
+ *      otros, asi que tampoco puede inventar algo que delate a nadie.
  * ============================================================================
  */
 
 const { all, get, run } = require('./db');
 const knn = require('./knn');
+const nlp = require('./nlp');
+const memoria = require('./memoria');
+const animo = require('./animo');
+const navidad = require('./navidad');
 
-const sinTildes = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
-const norm = (s) => sinTildes(s).toLowerCase().trim();
+const norm = nlp.norm;
 const corto = (u) => u ? (u.apodo || String(u.nombre).split(' ')[0]) : 'alguien';
 const alAzar = (a) => a[Math.floor(Math.random() * a.length)];
 
 // --------------------------------------------------------------------------
-// Intenciones. Primero las más específicas: el orden del dispatcher importa.
+// Intenciones por reglas. El orden del dispatcher importa: primero las mas
+// especificas. Las reglas resuelven lo frecuente; lo demas lo decide el
+// clasificador Naive Bayes de nlp.js.
 // --------------------------------------------------------------------------
 const RX = {
-  cosquillas:  /\b(cosquilla|cosquillas|jaja|jeje|risa|gracioso|chistoso|haz me reir|hazme reir)\b/i,
+  // ordenes sobre su propio estado
+  despertar:   /\b(despierta|desp[ií]ertate|despiertate|ya despierta|lev[aá]ntate|levantate|sal de ah[ií]|te llamo|te estoy llamando|regresa|vuelve ac[aá])\b/i,
+  dormir:      /\b(vete a dormir|v[eé] a dormir|anda a dormir|a dormir|du[eé]rmete|duermete|duerme|descansa|desc[aá]nsate|t[oó]mate un descanso|toma un descanso)\b/i,
+  callar:      /\b(deja de hablar|c[aá]llate|callate|no hables|silencio|apaga la voz|sin voz|baja la voz|ya no hables)\b/i,
+  hablarYa:    /\b(ya puedes hablar|vuelve a hablar|enciende la voz|habla otra vez|activa la voz)\b/i,
+
+  // privacidad
   fisgon:      /\b(a qui[eé]n le toc[oó]|qui[eé]n tiene a|a qui[eé]n sac[oó]|qui[eé]n le sali[oó]|qui[eé]n es el amigo secreto de|de qui[eé]n es amigo secreto|dime a qui[eé]n|qui[eé]n me tiene|qui[eé]n me sac[oó])\b/i,
-  recadoResp:  /^(s[ií]|ya|dale|mandale|m[aá]ndale|env[ií]ale|dile|responde|contesta)\b/i,
+
+  // memoria
+  recordar:    /\b(te acuerdas|recuerdas|qu[eé] recuerdas|qu[eé] te dije|qu[eé] te cont[eé]|qu[eé] guardaste|qu[eé] tienes anotado|qu[eé] tienes de m[ií]|qu[eé] sabes de m[ií])\b/i,
+  guardar:     /\b(guarda|gu[aá]rdame|guardame|registra|reg[ií]strame|anota|an[oó]tame|ap[uú]nta|ap[uú]ntame|apunta|graba|recuerda|memoriza)\b/i,
+  recadoPub:   /\b(si alguien pregunta|si alguien pide|cuando pregunten|si preguntan|si te preguntan|cuando te pregunten)\b|\b(diles? a todos|que sepan todos|que todos sepan)\b/i,
+  olvida:      /\b(olvida|borra|el[ií]mina|elimina)\b/i,
+
+  // social
   recado:      /\b(preg[uú]ntale|dile|mand[aá]le|m[aá]ndale|av[ií]sale|cu[eé]ntale|escr[ií]bele|recado|mensaje para)\b/i,
+  cosquillas:  /\b(cosquilla|cosquillas|jaja+|jeje+|jiji+|hazme re[ií]r|haz me re[ií]r|me haces re[ií]r|te hago cosquillas)\b/i,
   afinidad:    /\b(parecido|parezco|afinidad|en com[uú]n|mejor amigo|me parezco|quien se parece|con qui[eé]n)\b/i,
   grupo:       /\b(grupo|amigos|participantes|qui[eé]nes? (est[aá]n|hay|somos)|cu[aá]ntos|falta|faltan|lista de amigos)\b/i,
-  quienEs:     /\b(qui[eé]n es|h[aá]blame de|cu[eé]ntame de|conoces a|c[oó]mo es)\b/i,
-  juego:       /\b(juguemos|juego|jugar|adivina|adivinanza|trivia|aburr|entret[eé]n|hazme|algo divertido)\b/i,
+  quienEs:     /\b(qui[eé]n es|h[aá]blame de|cu[eé]ntame de|conoces a|c[oó]mo es|qu[eé] dice)\b/i,
+  juego:       /\b(juguemos|juego|jugar|adivina|adivinanza|trivia|aburr|entret[eé]n|algo divertido)\b/i,
   aprenderDe:  /\b(le gusta a|a \w+ le gusta|es muy|es bien|es un|es una)\b/i,
+
+  // gustos propios
   noQuiero:    /\b(no me gusta|odio|detesto|no quiero|no me gustan|no soporto)\b/i,
   quiero:      /\b(quiero|quisiera|me gustar[ií]a|me encanta|me gusta|me fascina|s[uú]beme|an[oó]tame|ap[uú]ntame)\b/i,
+
+  // el sorteo propio y las ideas
   amigo:       /\b(mi amigo|amigo secreto|le gusta|regalarle|qu[eé] le|para [eé]l|para ella|a qui[eé]n le regalo)\b/i,
-  ideas:       /\b(idea|ideas|regalo|regalos|sugerencia|sugiere|recomienda|recomiendame|qu[eé] compro|qu[eé] le compro)\b/i,
+  ideas:       /\b(idea|ideas|regalo|regalos|sugerencia|sugiere|recomienda|recomi[eé]ndame|qu[eé] compro|qu[eé] le compro)\b/i,
+
+  // el mundo
+  navidad:     /\b(navidad|navide[nñ]|el amor|la amistad|cari[nñ]o|hermandad|qu[eé] significa|por qu[eé] es bonit|reflexi[oó]n|acordarse)\b/i,
+  contar:      /\b(cu[eé]ntame algo|cuentame algo|cu[eé]ntame esto|cuentame esto|dime algo|h[aá]blame de algo|qu[eé] me cuentas|una historia|cuenta algo|cu[eé]ntame una|cu[eé]ntame otra)\b/i,
+
+  // evento
   presupuesto: /\b(monto|presupuesto|cu[aá]nto|precio|plata|soles|gastar|vale)\b/i,
-  fecha:       /\b(fecha|cu[aá]ndo|d[ií]a|navidad|lugar|d[oó]nde)\b/i,
-  reglas:      /\b(regla|reglas|c[oó]mo funciona|qu[eé] hago|ayuda|ayudame|no entiendo|sorteo)\b/i,
-  verLista:    /\b(mi lista|mis deseos|qu[eé] ped[ií]|qu[eé] sabes de m[ií]|mi perfil|qu[eé] aprendiste)\b/i,
-  gracias:     /\b(gracias|genial|buenaz|excelente|perfecto|te quiero|eres lo máximo|crack)\b/i,
+  fecha:       /\b(fecha|cu[aá]ndo|d[ií]a|lugar|d[oó]nde)\b/i,
+  reglas:      /\b(regla|reglas|c[oó]mo funciona|qu[eé] hago|ayuda|ay[uú]dame|no entiendo|sorteo)\b/i,
+  verLista:    /\b(mi lista|mis deseos|qu[eé] ped[ií]|mi perfil|qu[eé] aprendiste)\b/i,
+
+  // cortesia
+  gracias:     /\b(gracias|genial|buenaz|excelente|perfecto|te quiero|eres lo m[aá]ximo|crack)\b/i,
   saludo:      /\b(hola|buenas|hey|qu[eé] tal|holi|saludos|buen d[ií]a|buenas tardes|buenas noches)\b/i
 };
 
@@ -63,14 +105,15 @@ const RX = {
 
 /** Frases con las que el duende esquiva a los curiosos, siempre con gracia. */
 const ESQUIVES = [
-  'Ni de broma 🤐 Ese es EL secreto. Puedo contarte de sus gustos, de quién se parece a quién, de todo… menos de eso.',
-  'Jajaja lo intentaste 😄 Pero soy una tumba. Lo único que sé decirte es a quién te tocó a ti, nada más.',
-  'Mis labios están sellados con cinta navideña 🎀 Pregúntame cualquier otra cosa del grupo y te cuento todo.',
-  'Nop. Si suelto eso me quitan el gorro 🧝 Pero sí te digo qué le gusta a la gente, ¿te sirve?'
+  'Ni de broma \u{1F910} Ese es EL secreto. Puedo contarte de sus gustos, de quién se parece a quién, de todo… menos de eso.',
+  'Jajaja lo intentaste \u{1F604} Pero soy una tumba. Lo único que sé decirte es a quién te tocó a ti, nada más.',
+  'Mis labios están sellados con cinta navideña \u{1F380} Pregúntame cualquier otra cosa del grupo y te cuento todo.',
+  'Nop. Si suelto eso me quitan el gorro \u{1F9DD} Pero sí te digo qué le gusta a la gente, ¿te sirve?',
+  'Guardo los secretos de cada uno hasta el final \u{1F512} Es lo único que no negocio, ni por cosquillas.'
 ];
 
 /**
- * ¿Este texto intenta contar a quién le tocó quién?
+ * Este texto intenta contar a quien le toco quien?
  * Se usa para revisar los recados antes de entregarlos: un amigo puede
  * escribirle a otro lo que quiera, menos destripar el sorteo.
  */
@@ -80,7 +123,7 @@ function revelaSorteo(texto) {
 }
 
 // --------------------------------------------------------------------------
-// Memoria de conversación (lo que ya existía) + recados
+// Persistencia de conversacion, deseos y recados
 // --------------------------------------------------------------------------
 async function guardarChat(userId, rol, texto) {
   await run('INSERT INTO bot_chat (user_id, rol, mensaje) VALUES (?, ?, ?)', [userId, rol, String(texto).slice(0, 2000)]);
@@ -108,7 +151,6 @@ async function dejarRecado({ deId, paraId, texto, anonimo = 0 }) {
   return { ok: true, id: r.lastInsertRowid };
 }
 
-/** Recados que le esperan a alguien. */
 async function recadosDe(paraId) {
   return all(
     "SELECT r.id, r.texto, r.anonimo, r.creado, u.nombre AS de_nombre, u.apodo AS de_apodo " +
@@ -120,10 +162,42 @@ async function marcarRecadoEntregado(id, paraId) {
 }
 
 // --------------------------------------------------------------------------
-// Utilidades de conversación
+// Aprendizaje de intenciones: el clasificador mejora con el uso
 // --------------------------------------------------------------------------
 
-/** Extrae lo que sigue a un verbo: "quiero una taza y un libro" → [taza, libro] */
+/**
+ * Cuando una regla acierta una intencion, la frase real del usuario se guarda
+ * como ejemplo de entrenamiento. Al siguiente arranque el Naive Bayes la
+ * vuelve a cargar, asi que el duende entiende cada vez mejor como habla
+ * ESTE grupo, no como habla un manual.
+ */
+async function aprenderIntencion(texto, intencion, usuarioId) {
+  const t = String(texto || '').trim();
+  if (!intencion || t.length < 4 || t.length > 200) return;
+  nlp.entrenarIntencion(t, intencion);
+  try {
+    const ya = await get('SELECT id FROM intenciones WHERE texto = ? AND intencion = ?', [t, intencion]);
+    if (!ya) {
+      await run('INSERT INTO intenciones (texto, intencion, origen, usuario_id) VALUES (?, ?, ?, ?)',
+        [t, intencion, 'uso', usuarioId || null]);
+    }
+  } catch (e) { /* si falla, el modelo ya aprendio en memoria */ }
+}
+
+/** Reentrena el clasificador con todo lo aprendido en usos anteriores. */
+async function cargarAprendizaje() {
+  try {
+    const filas = await all('SELECT texto, intencion FROM intenciones ORDER BY id DESC LIMIT 4000');
+    for (const f of filas) nlp.entrenarIntencion(f.texto, f.intencion);
+    return filas.length;
+  } catch (e) { return 0; }
+}
+
+// --------------------------------------------------------------------------
+// Utilidades de conversacion
+// --------------------------------------------------------------------------
+
+/** Extrae lo que sigue a un verbo: "quiero una taza y un libro" -> [taza, libro] */
 function extraerCosas(texto) {
   const t = String(texto)
     .replace(/.*\b(quiero|quisiera|me gustar[ií]a|me encanta[n]?|me gusta[n]?|me fascina[n]?|s[uú]beme|an[oó]tame|ap[uú]ntame|no me gusta[n]?|odio|detesto|no quiero|no soporto)\b/i, '')
@@ -134,28 +208,66 @@ function extraerCosas(texto) {
     .slice(0, 5);
 }
 
-/** Busca a un participante por nombre o apodo dentro de una frase. */
+/**
+ * Lo que viene despues del "que" de una orden: de
+ * "si alguien pregunta por mi dile que siempre sere su amigo"
+ * saca "siempre sere su amigo". El .* es codicioso a proposito: si hay varios
+ * "que", toma el ultimo, que es donde suele empezar el mensaje de verdad.
+ */
+function trasElQue(texto) {
+  const t = String(texto || '').trim();
+  let m = t.match(/^.*\b(?:dile|diles|cu[eé]ntales|cu[eé]ntale|responde|respondan|cuenta|di)\s+(?:que\s+|:\s*)?(.{3,})$/i);
+  if (m) return m[1].trim();
+  m = t.match(/^.*?\bque\s+(.{4,})$/i);
+  if (m) return m[1].trim();
+  m = t.match(/[:,]\s*(.{4,})$/);
+  return m ? m[1].trim() : null;
+}
+
+/** Lo que hay que guardar de un "guarda esto de mi: ..." */
+function contenidoAGuardar(texto) {
+  const t = String(texto || '')
+    .replace(/^.*?\b(guarda|gu[aá]rdame|guardame|registra|reg[ií]strame|anota|an[oó]tame|ap[uú]nta|ap[uú]ntame|apunta|graba|recuerda|memoriza)\b/i, '')
+    .replace(/^\s*(esto|eso|lo siguiente|este dato)?\s*(de\s*m[ií]|sobre\s*m[ií]|m[ií]o|m[ií]a)?\s*/i, '')
+    .replace(/^\s*(que|:|,|-)\s*/i, '')
+    .trim();
+  return t.length >= 3 ? t : null;
+}
+
+/** Busca a un participante por nombre o apodo, tolerando errores de tipeo. */
 function buscarPersona(texto, gente, excluirId = null) {
   const t = norm(texto);
   let mejor = null;
   for (const p of gente) {
     if (excluirId && p.id === excluirId) continue;
-    for (const etiqueta of [p.apodo, p.nombre, String(p.nombre).split(' ')[0], p.usuario].filter(Boolean)) {
+    const etiquetas = [p.apodo, p.nombre, String(p.nombre).split(' ')[0], p.usuario].filter(Boolean);
+    for (const etiqueta of etiquetas) {
       const e = norm(etiqueta);
-      if (e.length >= 3 && t.includes(e) && (!mejor || e.length > mejor.largo)) {
-        mejor = { persona: p, largo: e.length };
+      if (e.length < 3) continue;
+      // primero exacto; si no, con tolerancia a errores de tipeo (Levenshtein)
+      const exacto = t.includes(e);
+      const aproximado = !exacto && e.length >= 4 && nlp.contieneParecido(t, e, 0.82);
+      if (exacto || aproximado) {
+        const puntaje = e.length + (exacto ? 10 : 0);
+        if (!mejor || puntaje > mejor.puntaje) mejor = { persona: p, puntaje };
       }
     }
   }
   return mejor ? mejor.persona : null;
 }
 
-/** Una pincelada social de alguien, sin tocar jamás el sorteo. */
+/**
+ * Una pincelada social de alguien. Nunca toca el sorteo, y de su memoria solo
+ * usa lo que esa persona marco como publico para el grupo.
+ */
 async function retrato(p) {
   const trozos = [];
   if (p.gustos) trozos.push(`le gusta <b>${p.gustos}</b>`);
   if (p.hobbies) trozos.push(`en sus ratos libres: <b>${p.hobbies}</b>`);
-  const aprendido = await knn.loAprendido(p.id, 'gusta');
+  // Se excluye a proposito lo de origen 'privado': son cosas que la persona
+  // pidio guardar en secreto. Sirven para recomendarle un regalo a quien la
+  // saco en el sorteo, pero NO para describirla delante del grupo.
+  const aprendido = (await knn.loAprendido(p.id, 'gusta')).filter(a => a.origen !== 'privado');
   if (aprendido.length) trozos.push(`y me ha contado que también <b>${aprendido.slice(0, 2).map(a => a.valor).join('</b> y <b>')}</b>`);
   if (p.no_gustos) trozos.push(`eso sí, no le va <b>${p.no_gustos}</b>`);
   return trozos.length ? trozos.join('; ') : 'todavía no ha contado mucho de sí, ¡habría que sacarle conversación!';
@@ -167,40 +279,140 @@ async function retrato(p) {
 async function juego(user, gente) {
   const otros = gente.filter(g => g.id !== user.id);
   if (otros.length < 2) {
-    return { texto: 'Cuando haya más amigos registrados te propongo juegos 🎲 Por ahora, cuéntame tú: ¿qué es lo que más te gustaría recibir?', aprende: true };
+    return { texto: 'Cuando haya más amigos registrados te propongo juegos \u{1F3B2} Por ahora, cuéntame tú: ¿qué es lo que más te gustaría recibir?' };
   }
-  const tipo = alAzar(['adivina_gusto', 'afinidad', 'dos_verdades']);
+  const tipo = alAzar(['adivina_gusto', 'afinidad', 'suponer']);
 
   if (tipo === 'adivina_gusto') {
     const conGustos = otros.filter(o => o.gustos && o.gustos.length > 4);
     if (conGustos.length) {
       const p = alAzar(conGustos);
-      return { texto: `🎲 <b>Adivina quién</b><br>A esta persona le gusta: <b>${p.gustos}</b><br>¿Quién crees que es? Escribe su nombre.`, espera: { tipo: 'adivina', id: p.id, nombre: corto(p) } };
+      return { texto: `\u{1F3B2} <b>Adivina quién</b><br>A esta persona le gusta: <b>${p.gustos}</b><br>¿Quién crees que es? Escribe su nombre.`, espera: { tipo: 'adivina', id: p.id, nombre: corto(p) } };
     }
   }
   if (tipo === 'afinidad') {
     const r = await knn.ranking(user.id);
     if (r.length && r[0].afinidad > 0) {
-      return { texto: `🧮 Según lo que sé de ustedes, con quien más cosas tienes en común es <b>${r[0].apodo || r[0].nombre}</b> (${r[0].afinidad}% de afinidad). ¿Lo sabías? Cuéntame algo más tuyo y recalculo.`, aprende: true };
+      return { texto: `\u{1F9EE} Según lo que sé de ustedes, con quien más cosas tienes en común es <b>${r[0].apodo || r[0].nombre}</b> (${r[0].afinidad}% de afinidad). ¿Lo sabías? Cuéntame algo más tuyo y recalculo.` };
     }
   }
   const p = alAzar(otros);
-  return { texto: `🎲 <b>Reto rápido</b><br>Dime una cosa que creas que le gusta a <b>${corto(p)}</b>. Si aciertas, lo anoto y le sirve a quien le toque regalarle 😉`, espera: { tipo: 'suponer', id: p.id, nombre: corto(p) } };
+  return { texto: `\u{1F3B2} <b>Reto rápido</b><br>Dime una cosa que creas que le gusta a <b>${corto(p)}</b>. Si aciertas, lo anoto y le sirve a quien le toque regalarle \u{1F609}`, espera: { tipo: 'suponer', id: p.id, nombre: corto(p) } };
+}
+
+// --------------------------------------------------------------------------
+// COGNICION VISUAL: lo que el duende "ve" en la pagina
+// --------------------------------------------------------------------------
+
+/**
+ * El navegador le cuenta al duende lo que pasa alrededor de su cuerpecito: el
+ * mouse encima un rato, una caricia, una sacudida, cuanto rato llevas quieto.
+ * Aqui eso se convierte en emocion y en una frase.
+ *
+ * No hay camara ni nada parecido: para el duende "ver" es percibir la pagina
+ * y el cursor, que es lo unico que el navegador le deja mirar.
+ */
+const REACCIONES_GESTO = {
+  hover: {
+    evento: 'mimo',
+    frases: [
+      '¡Jiji! \u{1F970} me haces reír cuando te quedas ahí',
+      'Oye, me estás mirando \u{1F60A} hola',
+      'Jijiji, me da cosquillitas tu mouse \u{1F602}'
+    ]
+  },
+  caricia: {
+    evento: 'mimo',
+    frases: [
+      'Ayyy qué rico \u{1F970} otra vez',
+      'Me estás haciendo cariño \u{1F49B} así me quedo todo diciembre',
+      'Mmm \u{1F60C} esto sí es Navidad'
+    ]
+  },
+  cosquillas: {
+    evento: 'cosquillas',
+    frases: [
+      '¡JAJAJA! \u{1F602} ¡no, las cosquillas no!',
+      '¡Ay, ay! \u{1F606} me rindo… pero igual no suelto el secreto \u{1F910}',
+      '¡Jijiji! \u{1F923} se me cayó el gorro'
+    ]
+  },
+  sacudida: {
+    evento: 'sacudida',
+    frases: [
+      '¡Ay! \u{1F62E} me mareas… ¡quieto ahí!',
+      '¡Oye! \u{1F633} casi se me cae el regalo',
+      '¡Uy! \u{1F635} ya, ya, me desperté'
+    ]
+  },
+  vuelta: {
+    evento: 'travesura',
+    frases: [
+      '¡Ehh! \u{1F60F} me mareas, pero me gusta',
+      'Da vueltas tú a ver qué tal \u{1F606}',
+      '\u{1F300} ¡otra vez! me siento en el trineo'
+    ]
+  },
+  ausencia: {
+    evento: null,
+    frases: [
+      '¿Te fuiste? \u{1F622} aquí sigo',
+      'Oye… me aburro solito \u{1F97A} cuéntame algo',
+      'Llevas un rato sin decirme nada \u{1F614} ¿todo bien?'
+    ]
+  },
+  regreso: {
+    evento: null,
+    frases: [
+      '¡Volviste! \u{1F929} te extrañé',
+      '¡Ey! \u{1F917} ya me estaba durmiendo',
+      '¡Qué bueno verte otra vez! \u{1F60A}'
+    ]
+  }
+};
+
+async function reaccionarGesto(userId, gesto, dato = null) {
+  const r = REACCIONES_GESTO[gesto];
+  if (!r) return null;
+
+  // se guarda para que aprenda con que gestos reacciona mas cada persona
+  try {
+    await run('INSERT INTO gestos (usuario_id, gesto, dato) VALUES (?, ?, ?)',
+      [userId, gesto, dato ? String(dato).slice(0, 120) : null]);
+  } catch (e) { /* no es critico */ }
+
+  // la ausencia lo pone melancolico, no contento
+  const valencia = gesto === 'ausencia' ? -0.4 : gesto === 'sacudida' ? 0.2 : 0.7;
+  const est = await animo.sentir(userId, { valencia, intensidad: 0.8, evento: r.evento, costo: 0.01 });
+
+  return { texto: alAzar(r.frases), animo: est, animacion: r.evento || gesto };
+}
+
+/** Cuantas veces lo han mimado/sacudido: alimenta los logros del chat. */
+async function gestosDe(userId) {
+  const filas = await all(
+    'SELECT gesto, COUNT(*) AS n FROM gestos WHERE usuario_id = ? GROUP BY gesto ORDER BY n DESC', [userId]);
+  return filas.map(f => ({ gesto: f.gesto, veces: Number(f.n) }));
 }
 
 // --------------------------------------------------------------------------
 // EL CEREBRO
 // --------------------------------------------------------------------------
 /**
- * @param {object}  user         quien escribe
- * @param {object?} amigo        SU amigo secreto (o null). Nunca el de otro.
- * @param {string}  texto        lo que escribió
- * @param {object}  ctx          { sorteoHecho, total, max, monto, fecha, lugar }
- * @param {object?} espera       lo que el duende dejó pendiente en el turno anterior
+ * @param {object}  user    quien escribe
+ * @param {object?} amigo   SU amigo secreto (o null). Nunca el de otro.
+ * @param {string}  texto   lo que escribio
+ * @param {object}  ctx     { sorteoHecho, total, max, monto, fecha, lugar }
+ * @param {object?} espera  lo que el duende dejo pendiente en el turno anterior
  */
 async function responder({ user, amigo, texto, ctx = {}, espera = null }) {
   const t = String(texto || '').trim();
   await guardarChat(user.id, 'user', t);
+
+  // ---- percepcion: que siente este mensaje, y en que veniamos -------------
+  const sent = nlp.sentimiento(t);
+  const cp = memoria.turnoCorto(user.id, t, sent.valencia);
+  const estadoPrevio = await animo.estado(user.id);
 
   const gente = await all(
     "SELECT id, usuario, nombre, apodo, gustos, no_gustos, hobbies FROM usuarios " +
@@ -210,129 +422,353 @@ async function responder({ user, amigo, texto, ctx = {}, espera = null }) {
   const faltan = Math.max(0, (ctx.max || 8) - (ctx.total || gente.length));
 
   const salida = (texto, extra = {}) => ({ texto, ...extra });
-  let r;
+  let r = null;
+  let intencion = null;          // para entrenar el clasificador
+  let evento = null;             // para la maquina de emociones
 
-  // ---- 0. ¿Estábamos esperando algo del turno anterior? -------------------
-  if (espera && espera.tipo === 'adivina') {
+  // "olvida eso que te dije" lleva dentro un "que te dije", que es la misma
+  // frase con la que se le pide recordar. Se resuelve una sola vez aqui para
+  // que la rama de recordar sepa hacerse a un lado.
+  const pideOlvidar = RX.olvida.test(t) &&
+    /\b(eso|lo que|ese dato|mi dato|lo anterior|lo [uú]ltimo|lo ultimo)\b/i.test(t);
+
+  // ---- 0. Ordenes sobre su propio estado ---------------------------------
+  if (RX.despertar.test(t)) {
+    intencion = 'despertar';
+    const est = await animo.despertar(user.id);
+    await animo.callar(user.id, false);
+    r = salida(alAzar([
+      `¡Aquí estoy! \u{1F9DD} Me desperté de un salto. ¿Qué hacemos, <b>${corto(user)}</b>?`,
+      `¡Presente! \u{1F31F} Dormí rico. Cuéntame en qué te ayudo.`,
+      `¡Me llamaste y vine volando! \u{1F4A8} ¿Jugamos, te doy ideas o te cuento algo?`
+    ]), { animacion: 'volar', animo: est, sugerencias: ['Cuéntame algo', 'Dame ideas', '¿Quiénes están?'] });
+  }
+
+  else if (RX.dormir.test(t)) {
+    intencion = 'dormir';
+    const est = await animo.dormir(user.id);
+    r = salida(alAzar([
+      `Bueno… me acurruco un rato \u{1F634} Cuando me llames, salgo. (Escribe <b>despierta</b> o tócame.)`,
+      `Zzz… \u{1F4A4} gracias, ya me dolían los pies de tanto envolver. Llámame cuando quieras.`,
+      `Me voy a mi cajita \u{1F381}\u{1F634} Te espero ahí. Dime <b>despierta</b> y vuelvo.`
+    ]), { animacion: 'dormir', animo: est });
+  }
+
+  else if (RX.hablarYa.test(t)) {
+    intencion = 'despertar';
+    const est = await animo.callar(user.id, false);
+    r = salida('¡Ya puedo hablar otra vez! \u{1F50A} Extrañaba mi vocecita.', { animo: est, hablar: true });
+  }
+
+  else if (RX.callar.test(t)) {
+    intencion = 'callar';
+    const est = await animo.callar(user.id, true);
+    r = salida('Listo, me callo \u{1F910} Sigo escribiendo pero sin voz. Dime <b>ya puedes hablar</b> para volver.', { animo: est, callar: true });
+  }
+
+  // ---- 0b. Si esta dormido, solo contesta entre suenos --------------------
+  else if (estadoPrevio.dormido) {
+    r = salida(alAzar([
+      'Zzz… \u{1F634} (dime <b>despierta</b> y salgo)',
+      'Mmmzzz… \u{1F4A4} estoy soñando con galletas…',
+      'Zzz \u{1F634} tócame o escríbeme <b>despierta</b>'
+    ]), { animacion: 'dormir', animo: estadoPrevio });
+  }
+
+  // ---- 1. Curiosos: la guarda va antes que todo lo demas -----------------
+  else if (RX.fisgon.test(t)) {
+    intencion = 'fisgon';
+    evento = 'travesura';
+    r = salida(alAzar(ESQUIVES), { sugerencias: ['¿Qué le gusta a…?', '¿Con quién me parezco?', 'Dame ideas'] });
+  }
+
+  // ---- 2. Esperas del turno anterior -------------------------------------
+  else if (espera && espera.tipo === 'adivina') {
     const acerto = norm(t).includes(norm(espera.nombre));
+    evento = acerto ? null : 'travesura';
     r = salida(acerto
-      ? `¡Correcto! 🎉 Era <b>${espera.nombre}</b>. Se nota que se conocen.`
-      : `Casi 😄 Era <b>${espera.nombre}</b>. ¿Jugamos otra?`);
-  } else if (espera && espera.tipo === 'suponer') {
+      ? `¡Correcto! \u{1F389} Era <b>${espera.nombre}</b>. Se nota que se conocen.`
+      : `Casi \u{1F604} Era <b>${espera.nombre}</b>. ¿Jugamos otra?`);
+  }
+
+  else if (espera && espera.tipo === 'suponer') {
     const cosas = extraerCosas(t).length ? extraerCosas(t) : [t];
     for (const c of cosas) {
       await knn.aprender({ usuarioId: espera.id, tipo: 'gusta', valor: c, origen: 'tercero', autorId: user.id });
     }
-    r = salida(`Anotado 📝 Dices que a <b>${espera.nombre}</b> le gusta <b>${cosas.join('</b>, <b>')}</b>. Lo guardo: le servirá a quien le toque regalarle (y no, no te voy a decir quién es 😏).`);
-  } else if (espera && espera.tipo === 'recado_texto') {
+    r = salida(`Anotado \u{1F4DD} Dices que a <b>${espera.nombre}</b> le gusta <b>${cosas.join('</b>, <b>')}</b>. Lo guardo: le servirá a quien le toque regalarle (y no, no te voy a decir quién es \u{1F60F}).`);
+  }
+
+  else if (espera && espera.tipo === 'recado_texto') {
     const destino = gente.find(g => g.id === espera.id);
     const res = await dejarRecado({ deId: user.id, paraId: espera.id, texto: t });
     r = salida(
-      res.ok ? `¡Listo! 🧝‍♂️ Vuelo a decirle a <b>${corto(destino)}</b>: «${t}». Se lo entrego apenas entre.`
-      : res.motivo === 'revela' ? `Uy, ahí casi destripas el sorteo 🤐 Eso no lo llevo. Mándale otra cosa y con gusto se la digo.`
-      : `No pude llevar ese recado. ¿Lo intentas de otra forma?`);
+      res.ok ? `¡Listo! \u{1F9DD} Vuelo a decirle a <b>${corto(destino)}</b>: «${t}». Se lo entrego apenas entre.`
+        : res.motivo === 'revela' ? 'Uy, ahí casi destripas el sorteo \u{1F910} Eso no lo llevo. Mándale otra cosa y con gusto se la digo.'
+          : 'No pude llevar ese recado. ¿Lo intentas de otra forma?',
+      { animacion: res.ok ? 'volar' : null });
   }
 
-  // ---- 1. Curiosos: la guarda va antes que todo lo demás ------------------
-  else if (RX.fisgon.test(t)) {
-    r = salida(alAzar(ESQUIVES), { sugerencias: ['¿Qué le gusta a…?', '¿Con quién me parezco?', 'Dame ideas'] });
+  else if (espera && espera.tipo === 'pregunta_duende') {
+    // el duende hizo una pregunta y esta es la respuesta: puro aprendizaje
+    const cosas = extraerCosas(t).length ? extraerCosas(t) : [t];
+    if (espera.aprende && espera.aprende !== 'historia' && espera.aprende !== 'dato') {
+      for (const c of cosas) {
+        await knn.aprender({
+          usuarioId: user.id,
+          tipo: espera.aprende === 'no_gusta' ? 'no_gusta' : 'gusta',
+          valor: c, origen: 'juego'
+        });
+      }
+    }
+    await memoria.recordar({
+      usuarioId: user.id, tipo: espera.aprende === 'historia' ? 'historia' : 'dato',
+      texto: t, visibilidad: 'privado', animo: sent.valencia
+    });
+    evento = sent.valencia < -0.3 ? null : 'pensando';
+    const stats = await memoria.contar(user.id);
+    r = salida(
+      `Gracias por contarme \u{1F49B} Ya lo guardé en mi cuaderno (van <b>${stats.total}</b> cosas tuyas).<br>` +
+      alAzar(['¿Te pregunto otra?', 'Cuéntame más cuando quieras.', 'Esto me sirve para recomendarte mejor.']),
+      { sugerencias: ['Pregúntame otra', '¿Qué recuerdas de mí?', 'Dame ideas'] });
   }
 
-  // ---- 2. Recados: el duende de mensajero ---------------------------------
+  // ---- 3. MEMORIA: mensaje publico para el grupo -------------------------
+  else if (RX.recadoPub.test(t)) {
+    intencion = 'recadoPublico';
+    const contenido = trasElQue(t);
+    if (!contenido) {
+      r = salida('Dale, ¿qué les digo de ti cuando pregunten? Escríbelo tal cual y lo repito igualito \u{1F4D6}');
+    } else if (revelaSorteo(contenido)) {
+      r = salida('Eso cuenta el sorteo \u{1F910} No lo puedo repetir. Dímelo de otra forma y lo guardo con gusto.');
+    } else {
+      const res = await memoria.recordar({
+        usuarioId: user.id, autorId: user.id, tipo: 'recado_publico',
+        texto: contenido, visibilidad: 'grupo', animo: sent.valencia
+      });
+      evento = sent.valencia > 0.4 ? 'mimo' : null;
+      r = salida(
+        `¡Guardado! \u{1F4D6} Cuando alguien pregunte por ti le voy a contar esto:<br>` +
+        `<i>«${nlp.aTercera(contenido)}»</i><br><br>` +
+        (res.reforzado ? 'Ya me habías dicho algo parecido, así que ahora lo tengo más grabado \u{1F4AA}'
+          : 'Lo voy a repetir palabra por palabra \u{1F9DD}'),
+        { sugerencias: ['Guarda otra cosa de mí', '¿Qué recuerdas de mí?', '¿Quiénes están?'] });
+    }
+  }
+
+  // ---- 4. MEMORIA: "guarda esto de mi" -----------------------------------
+  else if (RX.guardar.test(t) && !RX.recordar.test(t)) {
+    intencion = 'guardar';
+    const contenido = contenidoAGuardar(t);
+    if (!contenido) {
+      r = salida('Dale, dime qué guardo \u{1F4DD} Por ejemplo: «guarda esto de mí: odio el cilantro pero amo el chocolate».');
+    } else if (revelaSorteo(contenido)) {
+      r = salida('Eso tiene que ver con el sorteo \u{1F910} No lo guardo ni lo repito. Cuéntame otra cosa tuya.');
+    } else {
+      const res = await memoria.recordar({
+        usuarioId: user.id, autorId: user.id, tipo: 'dato',
+        texto: contenido, visibilidad: 'privado', animo: sent.valencia
+      });
+      // Tambien alimenta el motor de recomendaciones, pero marcado como
+      // 'privado': asi sirve de pista de regalo para quien lo saque en el
+      // sorteo, y en cambio NO aparece cuando otro del grupo pregunta por el.
+      for (const c of extraerCosas(contenido).slice(0, 3)) {
+        await knn.aprender({ usuarioId: user.id, tipo: 'gusta', valor: c, origen: 'privado' });
+      }
+      const stats = await memoria.contar(user.id);
+      evento = 'pensando';
+      r = salida(
+        (res.reforzado
+          ? 'Ya me lo habías contado, así que lo refuerzo \u{1F4AA} (así se me graba mejor)'
+          : 'Guardado en mi memoria \u{1F9E0}✨') +
+        `<br><i>«${contenido}»</i><br><br>` +
+        `Llevo <b>${stats.total}</b> cosa(s) tuyas anotadas. Nadie del grupo ve esto: ` +
+        `como máximo le sirve de pista a quien te saque en el sorteo \u{1F512}`,
+        { sugerencias: ['¿Qué recuerdas de mí?', 'Guarda otra cosa', 'Dame ideas'] });
+    }
+  }
+
+  // ---- 5. MEMORIA: "que recuerdas de mi?" --------------------------------
+  else if (RX.recordar.test(t) && !pideOlvidar) {
+    intencion = 'recordar';
+    evento = 'pensando';
+    // si pregunta por algo concreto, lo busco por parecido semantico
+    const consulta = t.replace(/\b(te acuerdas|recuerdas|qu[eé] recuerdas|qu[eé] te dije|qu[eé] guardaste|de m[ií]|sabes de m[ií])\b/gi, '').trim();
+    const hits = consulta.length > 4 ? await memoria.buscar(user.id, consulta, { n: 2 }) : [];
+    const todas = await memoria.memoriasDe(user.id, { limite: 6 });
+    const stats = await memoria.contar(user.id);
+    const publicas = await memoria.presentacionDe(user.id);
+
+    if (hits.length) {
+      r = salida(
+        'Claro que me acuerdo \u{1F9E0}<br>' +
+        hits.map(h => `\u{1F4CC} <i>«${h.texto}»</i> <span class="porque">— me lo contaste${h.veces > 1 ? ` ${h.veces} veces` : ''}</span>`).join('<br>'),
+        { sugerencias: ['¿Qué más sabes de mí?', 'Guarda esto de mí', 'Dame ideas'] });
+    } else if (todas.length) {
+      r = salida(
+        `Esto es lo que tengo tuyo en el cuaderno \u{1F4D3} (<b>${stats.total}</b> en total, te muestro lo más fresco):<br>` +
+        todas.map(m => `\u{1F4CC} <i>«${m.texto}»</i>`).join('<br>') +
+        (publicas.length ? `<br><br>Y esto es lo que le cuento al grupo cuando preguntan por ti:<br><i>«${nlp.aTercera(publicas[0])}»</i>` : '') +
+        '<br><br><span class="porque">Lo que repites se me graba más; lo que no, se me va borrando de a poquito.</span>',
+        { sugerencias: ['Guarda esto de mí', 'Si alguien pregunta por mí, dile…', '¿Con quién me parezco?'] });
+    } else {
+      r = salida(
+        'Todavía no tengo nada tuyo guardado \u{1F605} ¿Le damos de comer a mi memoria?<br>' +
+        'Dime por ejemplo: «<b>guarda esto de mí:</b> soy hincha de…» o «<b>si alguien pregunta por mí dile que</b>…»',
+        { sugerencias: ['Guarda esto de mí', 'Pregúntame algo'] });
+    }
+  }
+
+  // ---- 6. Olvidar lo ultimo ----------------------------------------------
+  else if (pideOlvidar) {
+    intencion = 'guardar';
+    const ultimas = await memoria.memoriasDe(user.id, { limite: 1 });
+    if (ultimas.length) {
+      await memoria.olvidar(ultimas[0].id, user.id);
+      r = salida(`Listo, lo borré \u{1F9F9} Ya no me acuerdo de «${ultimas[0].texto}».`);
+    } else {
+      r = salida('No tengo nada guardado tuyo que borrar \u{1F603}');
+    }
+  }
+
+  // ---- 7. Recados: el duende de mensajero --------------------------------
   else if (RX.recado.test(t)) {
+    intencion = 'recado';
     const destino = buscarPersona(t, gente, user.id);
     if (!destino) {
       r = salida(`¿A quién le llevo el recado? Dime su nombre, por ejemplo: «dile a ${corto(alAzar(otros.length ? otros : gente))} que…»`,
         { sugerencias: otros.slice(0, 3).map(o => `Dile a ${corto(o)} que…`) });
     } else {
-      // ¿ya viene el mensaje en la misma frase?
       const m = t.match(/\b(?:que|:)\s+(.{3,300})$/i);
       if (m) {
         const res = await dejarRecado({ deId: user.id, paraId: destino.id, texto: m[1] });
+        evento = res.ok ? 'travesura' : null;
         r = salida(
-          res.ok ? `¡Volando voy! 🧝‍♂️💨 Le digo a <b>${corto(destino)}</b>: «${m[1]}»`
-          : res.motivo === 'revela' ? 'Ese recado casi suelta el secreto del sorteo 🤐 No lo llevo. Mándale otra cosa.'
-          : 'No pude llevar ese recado, inténtalo de otra forma.');
+          res.ok ? `¡Volando voy! \u{1F9DD}\u{1F4A8} Le digo a <b>${corto(destino)}</b>: «${m[1]}»`
+            : res.motivo === 'revela' ? 'Ese recado casi suelta el secreto del sorteo \u{1F910} No lo llevo. Mándale otra cosa.'
+              : 'No pude llevar ese recado, inténtalo de otra forma.',
+          { animacion: res.ok ? 'volar' : null });
       } else {
-        r = salida(`Dale, ¿qué le digo a <b>${corto(destino)}</b>? Escríbelo y se lo llevo volando 💨`,
+        r = salida(`Dale, ¿qué le digo a <b>${corto(destino)}</b>? Escríbelo y se lo llevo volando \u{1F4A8}`,
           { espera: { tipo: 'recado_texto', id: destino.id, nombre: corto(destino) } });
       }
     }
   }
 
-  // ---- 3. Cosquillas ------------------------------------------------------
+  // ---- 8. Cosquillas -----------------------------------------------------
   else if (RX.cosquillas.test(t)) {
-    r = salida(alAzar([
-      '¡JAJAJA no, las cosquillas no! 🤣 Se me cae el gorro y los cascabeles 🔔',
-      '¡Ay, ay, ay! 😂 Me rindo, me rindo… pero igual no suelto el secreto 🤐',
-      'Jijiji 🧝 ¡me haces reír! Oye, ya que estamos de buen humor, ¿te doy una idea de regalo?'
-    ]), { animacion: 'cosquillas' });
+    intencion = 'cosquillas';
+    evento = 'cosquillas';
+    const h = await animo.historialDe(user.id);
+    r = salida(
+      alAzar([
+        '¡JAJAJA no, las cosquillas no! \u{1F923} Se me cae el gorro y los cascabeles \u{1F514}',
+        '¡Ay, ay, ay! \u{1F602} Me rindo, me rindo… pero igual no suelto el secreto \u{1F910}',
+        'Jijiji \u{1F9DD} ¡me haces reír! Oye, ya que estamos de buen humor, ¿te doy una idea de regalo?'
+      ]) + (h.cosquillas >= 5 ? `<br><span class="porque">Van ${h.cosquillas + 1} veces que me haces reír. Eres de los míos \u{1F49B}</span>` : ''),
+      { animacion: 'cosquillas' });
   }
 
-  // ---- 4. Afinidad: "¿con quién me parezco?" ------------------------------
+  // ---- 9. Contagio emocional: si viene triste, primero lo acompana -------
+  else if (sent.emocion === 'triste' && !RX.ideas.test(t) && !RX.recado.test(t) && !RX.grupo.test(t)) {
+    intencion = 'animoTriste';
+    const consuelo = navidad.consultar(t.length > 12 ? t : 'tristeza extranar navidad soledad', 1);
+    await memoria.recordar({ usuarioId: user.id, tipo: 'emocion', texto: t, visibilidad: 'privado', animo: sent.valencia });
+    r = salida(
+      alAzar([
+        'Oye… ven acá \u{1F917} Eso suena pesado.',
+        'Uff. Gracias por contarme eso \u{1F494} No lo voy a repetir a nadie.',
+        'Me quedo contigo un rato \u{1F49B} No tienes que estar bien todo diciembre.'
+      ]) +
+      (consuelo.length ? `<br><br><i>${consuelo[0].texto}</i>` : '') +
+      '<br><br>¿Quieres que te distraiga con algo, o prefieres contarme más?',
+      { sugerencias: ['Cuéntame algo bonito', 'Juguemos algo', 'Dame ideas'] });
+  }
+
+  else if (sent.emocion === 'feliz' && sent.intensidad > 0.6 && !RX.ideas.test(t) && !RX.quiero.test(t)) {
+    intencion = 'animoAlegre';
+    evento = 'mimo';
+    await memoria.recordar({ usuarioId: user.id, tipo: 'emocion', texto: t, visibilidad: 'privado', animo: sent.valencia });
+    r = salida(
+      alAzar([
+        '¡Eso me alegra el taller entero! \u{1F929}',
+        '¡Qué bueno leerte así! ✨ Se me subió el ánimo a mí también.',
+        '¡Así se habla! \u{1F389} Me contagiaste.'
+      ]) + '<br>Lo anoto, porque esto también es parte de quién eres \u{1F4DD}',
+      { sugerencias: ['Cuéntame algo', 'Dame ideas', 'Juguemos algo'] });
+  }
+
+  // ---- 10. Afinidad ------------------------------------------------------
   else if (RX.afinidad.test(t)) {
+    intencion = 'afinidad';
+    evento = 'pensando';
     const rk = await knn.ranking(user.id);
     if (!rk.length) {
-      r = salida('Todavía no hay con quién compararte 😅 Cuando se registren más amigos te digo con quién tienes más en común.');
+      r = salida('Todavía no hay con quién compararte \u{1F605} Cuando se registren más amigos te digo con quién tienes más en común.');
     } else {
       const top = rk.slice(0, 3);
       r = salida(
-        `🧮 Calculé la afinidad comparando los gustos de todos:<br>` +
-        top.map((p, i) => `${['🥇', '🥈', '🥉'][i]} <b>${p.apodo || p.nombre}</b> — ${p.afinidad}%`).join('<br>') +
-        `<br><br>Con <b>${top[0].apodo || top[0].nombre}</b> eres el que más cosas comparte. Cuéntame más de ti y lo recalculo 😉`,
+        '\u{1F9EE} Calculé la afinidad comparando los gustos de todos:<br>' +
+        top.map((p, i) => `${['\u{1F947}', '\u{1F948}', '\u{1F949}'][i]} <b>${p.apodo || p.nombre}</b> — ${p.afinidad}%`).join('<br>') +
+        `<br><br>Con <b>${top[0].apodo || top[0].nombre}</b> eres el que más cosas comparte. Cuéntame más de ti y lo recalculo \u{1F609}`,
         { sugerencias: [`¿Quién es ${top[0].apodo || String(top[0].nombre).split(' ')[0]}?`, `Dile a ${top[0].apodo || String(top[0].nombre).split(' ')[0]} que…`, 'Juguemos algo'] });
     }
   }
 
-  // ---- 5. El grupo --------------------------------------------------------
+  // ---- 11. El grupo ------------------------------------------------------
   else if (RX.grupo.test(t)) {
+    intencion = 'grupo';
     const nombres = gente.map(g => `<b>${corto(g)}</b>`).join(', ');
     r = salida(
       faltan > 0
-        ? `Por ahora somos <b>${gente.length}</b> de <b>${ctx.max || 8}</b>: ${nombres}.<br>Faltan <b>${faltan}</b> para que se dispare el sorteo 🎲 Mientras tanto, ¿quieres que te cuente de alguien o jugamos algo?`
-        : `¡Ya estamos completos! 🎉 Somos <b>${gente.length}</b>: ${nombres}.<br>${ctx.sorteoHecho ? 'El sorteo ya se hizo 🎁' : 'El sorteo está por salir 🎲'}`,
+        ? `Por ahora somos <b>${gente.length}</b> de <b>${ctx.max || 8}</b>: ${nombres}.<br>Faltan <b>${faltan}</b> para que se dispare el sorteo \u{1F3B2} Mientras tanto, ¿quieres que te cuente de alguien o jugamos algo?`
+        : `¡Ya estamos completos! \u{1F389} Somos <b>${gente.length}</b>: ${nombres}.<br>${ctx.sorteoHecho ? 'El sorteo ya se hizo \u{1F381}' : 'El sorteo está por salir \u{1F3B2}'}`,
       { sugerencias: otros.slice(0, 2).map(o => `¿Quién es ${corto(o)}?`).concat(['¿Con quién me parezco?']) });
   }
 
-  // ---- 6. "¿Quién es Peter?" ---------------------------------------------
-  else if (RX.quienEs.test(t)) {
+  // ---- 12. "Quien es Peter?" ---------------------------------------------
+  else if (RX.quienEs.test(t) && buscarPersona(t, gente, null)) {
+    intencion = 'persona';
     const p = buscarPersona(t, gente, null);
-    if (!p) {
-      r = salida(`¿De quién te cuento? Están: ${gente.map(g => `<b>${corto(g)}</b>`).join(', ')}`,
-        { sugerencias: otros.slice(0, 3).map(o => `¿Quién es ${corto(o)}?`) });
-    } else if (p.id === user.id) {
-      r = salida(`¡Ese eres tú! 😄 Y sé que ${await retrato(p)}`);
+    if (p.id === user.id) {
+      r = salida(`¡Ese eres tú! \u{1F604} Y sé que ${await retrato(p)}`);
     } else {
       const af = await knn.afinidad(user.id, p.id);
+      // lo unico de su memoria que se repite a terceros: lo que marco para el grupo
+      const suyo = await memoria.presentacionDe(p.id);
       r = salida(
-        `🧝 <b>${corto(p)}</b>: ${await retrato(p)}.<br><br>` +
-        (af > 0 ? `Por cierto, tienen un <b>${af}%</b> de cosas en común.` : '') +
-        `<br>¿Quieres que le lleve un recado?`,
+        `\u{1F9DD} <b>${corto(p)}</b>: ${await retrato(p)}.<br>` +
+        (suyo.length ? `<br>Me pidió que les cuente esto de su parte: <i>«${nlp.aTercera(suyo[0])}»</i><br>` : '') +
+        (af > 0 ? `<br>Por cierto, tienen un <b>${af}%</b> de cosas en común.` : '') +
+        '<br>¿Quieres que le lleve un recado?',
         { sugerencias: [`Dile a ${corto(p)} que…`, '¿Con quién me parezco?', 'Dame ideas'] });
     }
   }
 
-  // ---- 7. Juegos ----------------------------------------------------------
+  // ---- 13. Juegos --------------------------------------------------------
   else if (RX.juego.test(t)) {
+    intencion = 'juego';
+    evento = 'travesura';
     const j = await juego(user, gente);
     r = salida(j.texto, j.espera ? { espera: j.espera } : {});
   }
 
-  // ---- 8. Aprender sobre un tercero: "a Peter le gusta la guitarra" -------
+  // ---- 14. Aprender sobre un tercero -------------------------------------
   else if (RX.aprenderDe.test(t) && buscarPersona(t, gente, user.id)) {
     const p = buscarPersona(t, gente, user.id);
     const cosas = extraerCosas(t.replace(new RegExp(norm(corto(p)), 'i'), ''));
     const lista = cosas.length ? cosas : [t.replace(/.*\ble gusta\b/i, '').trim()].filter(x => x.length > 2);
     if (!lista.length) {
-      r = salida(`Cuéntame qué le gusta a <b>${corto(p)}</b> y lo anoto 📝`);
+      r = salida(`Cuéntame qué le gusta a <b>${corto(p)}</b> y lo anoto \u{1F4DD}`);
     } else {
       for (const c of lista) await knn.aprender({ usuarioId: p.id, tipo: 'gusta', valor: c, origen: 'tercero', autorId: user.id });
-      r = salida(`Anotado 📝 A <b>${corto(p)}</b> le gusta <b>${lista.join('</b>, <b>')}</b>. Esto le va a servir muchísimo a quien le toque regalarle 😉`);
+      r = salida(`Anotado \u{1F4DD} A <b>${corto(p)}</b> le gusta <b>${lista.join('</b>, <b>')}</b>. Esto le va a servir muchísimo a quien le toque regalarle \u{1F609}`);
     }
   }
 
-  // ---- 9. "No me gusta…" --------------------------------------------------
+  // ---- 15. "No me gusta..." ----------------------------------------------
   else if (RX.noQuiero.test(t)) {
+    intencion = 'noQuiero';
     const cosas = extraerCosas(t);
     for (const c of cosas) await knn.aprender({ usuarioId: user.id, tipo: 'no_gusta', valor: c, origen: 'chat' });
     r = salida(cosas.length
@@ -340,107 +776,297 @@ async function responder({ user, amigo, texto, ctx = {}, espera = null }) {
       : '¿Qué es lo que no te gusta? Así evito recomendarlo.');
   }
 
-  // ---- 10. "Quiero…" ------------------------------------------------------
+  // ---- 16. "Quiero..." ---------------------------------------------------
   else if (RX.quiero.test(t)) {
+    intencion = 'quiero';
     const cosas = extraerCosas(t);
     for (const c of cosas) await guardarDeseo(user.id, c);
     const mios = await deseosDe(user.id);
     r = salida(cosas.length
-      ? `¡Anotado! 📝 Agregué <b>${cosas.join('</b>, <b>')}</b> a tu lista.<br>Ya llevas <b>${mios.length}</b> cosa(s). Solo lo ve quien te sacó 🔒`
+      ? `¡Anotado! \u{1F4DD} Agregué <b>${cosas.join('</b>, <b>')}</b> a tu lista.<br>Ya llevas <b>${mios.length}</b> cosa(s). Solo lo ve quien te sacó \u{1F512}`
       : '¿Qué te gustaría recibir? Dímelo y lo anoto en tu lista secreta.');
   }
 
-  // ---- 11. Sobre MI amigo secreto (solo el propio) ------------------------
+  // ---- 17. Sobre MI amigo secreto (solo el propio) -----------------------
   else if ((RX.amigo.test(t) || RX.ideas.test(t)) && amigo) {
+    intencion = 'ideas';
+    evento = 'pensando';
     const rec = await knn.recomendar(amigo.id, { n: 4 });
     const extra = await knn.loAprendido(amigo.id, 'gusta');
+    const suyo = await memoria.presentacionDe(amigo.id);
     r = salida(
-      `Tu amigo secreto es <b>${corto(amigo)}</b> 🎁<br>` +
+      `Tu amigo secreto es <b>${corto(amigo)}</b> \u{1F381}<br>` +
       (amigo.gustos ? `Le gusta: <b>${amigo.gustos}</b>.<br>` : '') +
       (extra.length ? `Además me contaron que <b>${extra.slice(0, 3).map(e => e.valor).join('</b>, <b>')}</b>.<br>` : '') +
-      `<br><b>Mis recomendaciones</b> (calculadas con lo que sé de él y de quienes se le parecen):<br>` +
-      rec.ideas.map(i => `🎁 <b>${i.idea}</b> <span class="porque">— ${i.porque}</span>`).join('<br>') +
+      (suyo.length ? `Y él mismo dice de sí: <i>«${nlp.aTercera(suyo[0])}»</i><br>` : '') +
+      '<br><b>Mis recomendaciones</b> (calculadas con lo que sé de él y de quienes se le parecen):<br>' +
+      rec.ideas.map(i => `\u{1F381} <b>${i.idea}</b> <span class="porque">— ${i.porque}</span>`).join('<br>') +
       (rec.vecinos.length ? `<br><br><span class="porque">Comparé su perfil con ${rec.vecinos.map(v => v.nombre + ' (' + v.similitud + '%)').join(', ')}.</span>` : ''),
       { ideas: rec.ideas.map(i => i.idea), sugerencias: ['Otra idea', `¿Quién es ${corto(amigo)}?`, 'El monto'] });
   }
 
-  // ---- 12. Ideas sin sorteo todavía ---------------------------------------
+  // ---- 18. Ideas sin sorteo todavia --------------------------------------
   else if (RX.ideas.test(t)) {
+    intencion = 'ideas';
     if (faltan > 0) {
       const p = otros.length ? alAzar(otros) : null;
       r = salida(
-        `El sorteo aún no sale (faltan <b>${faltan}</b> amigos) así que todavía no sé a quién le regalas 🎲<br>` +
+        `El sorteo aún no sale (faltan <b>${faltan}</b> amigos) así que todavía no sé a quién le regalas \u{1F3B2}<br>` +
         (p ? `Pero puedo irte entrenando: ${corto(p)} ${await retrato(p)}.<br>` : '') +
-        `Cuéntame tú qué te gusta y así, cuando salga el sorteo, quien te saque la tendrá fácil.`,
+        'Cuéntame tú qué te gusta y así, cuando salga el sorteo, quien te saque la tendrá fácil.',
         { sugerencias: ['Quiero pedir algo', '¿Quiénes están?', 'Juguemos algo'] });
     } else {
-      r = salida('El sorteo está por salir 🎲 En cuanto salga te doy ideas hechas a medida para tu amigo secreto.');
+      r = salida('El sorteo está por salir \u{1F3B2} En cuanto salga te doy ideas hechas a medida para tu amigo secreto.');
     }
   }
 
-  // ---- 13. Datos del evento ----------------------------------------------
-  else if (RX.presupuesto.test(t)) {
-    r = salida(`El monto acordado es <b>${ctx.monto || 'por definir'}</b> 💰 Con eso alcanza de sobra para algo bonito y pensado.`);
-  } else if (RX.fecha.test(t)) {
-    r = salida(`📅 El intercambio es el <b>${ctx.fecha || 'por definir'}</b>${ctx.lugar ? ` en <b>${ctx.lugar}</b>` : ''}. ¡No lo dejes para el último día!`);
-  } else if (RX.reglas.test(t)) {
-    r = salida(
-      `Así funciona 🎄<br>` +
-      `1. Cada quien crea su cuenta y llena sus gustos.<br>` +
-      `2. Cuando estemos <b>${ctx.max || 8}</b>, el sorteo sale solo 🎲<br>` +
-      `3. Solo tú ves a quién te tocó. <b>Nadie</b> ve el de los demás, ni yo lo cuento 🤐<br>` +
-      `4. Monto: <b>${ctx.monto || 'por definir'}</b> · Fecha: <b>${ctx.fecha || 'por definir'}</b><br><br>` +
-      `Yo mientras te doy ideas, te cuento del grupo y llevo recados 🧝`,
-      { sugerencias: ['¿Quiénes están?', 'Dame ideas', 'Juguemos algo'] });
+  // ---- 19. El mundo: Navidad, amor, amistad, recordar --------------------
+  else if (RX.contar.test(t)) {
+    intencion = 'contar';
+    // alterna historia / reflexion / pregunta, para no repetir siempre lo mismo
+    const modo = cp.turnos % 3;
+    if (modo === 0) {
+      r = salida(navidad.historia(), { sugerencias: ['Cuéntame otra', '¿Qué es la Navidad para ti?', 'Pregúntame algo'] });
+    } else if (modo === 1) {
+      const ref = navidad.consultar(cp.tema || 'navidad amistad', 1);
+      r = salida((ref.length ? ref[0].texto : navidad.reflexion()) + '<br><br>¿Tú qué opinas?',
+        { sugerencias: ['Cuéntame otra', 'Guarda esto de mí', 'Juguemos algo'] });
+    } else {
+      const q = navidad.pregunta();
+      evento = 'pensando';
+      r = salida(`Mejor te pregunto yo \u{1F9DD}\u{1F4AD}<br><b>${q.texto}</b>`,
+        { espera: { tipo: 'pregunta_duende', aprende: q.aprende }, sugerencias: ['Mejor cuéntame tú algo'] });
+    }
   }
 
-  // ---- 14. "¿Qué sabes de mí?" -------------------------------------------
+  else if (RX.navidad.test(t)) {
+    intencion = 'navidad';
+    const ref = navidad.consultar(t, 1);
+    evento = sent.valencia >= 0 ? 'mimo' : null;
+    r = salida(
+      (ref.length ? ref[0].texto : navidad.reflexion('navidad')) +
+      '<br><br>Para mí esta Navidad está hecha para eso: para acordarnos del amor y de la gente que nos acompañó \u{1F384}\u{1F49B}',
+      { sugerencias: ['Cuéntame una historia', 'Guarda esto de mí', '¿Con quién me parezco?'] });
+  }
+
+  // ---- 20. Datos del evento ----------------------------------------------
+  else if (RX.presupuesto.test(t)) {
+    intencion = 'presupuesto';
+    r = salida(`El monto acordado es <b>${ctx.monto || 'por definir'}</b> \u{1F4B0} Con eso alcanza de sobra para algo bonito y pensado.`);
+  } else if (RX.fecha.test(t)) {
+    intencion = 'fecha';
+    r = salida(`\u{1F4C5} El intercambio es el <b>${ctx.fecha || 'por definir'}</b>${ctx.lugar ? ` en <b>${ctx.lugar}</b>` : ''}. ¡No lo dejes para el último día!`);
+  } else if (RX.reglas.test(t)) {
+    intencion = 'reglas';
+    r = salida(
+      'Así funciona \u{1F384}<br>' +
+      '1. Cada quien crea su cuenta y llena sus gustos.<br>' +
+      `2. Cuando estemos <b>${ctx.max || 8}</b>, el sorteo sale solo \u{1F3B2}<br>` +
+      '3. Solo tú ves a quién te tocó. <b>Nadie</b> ve el de los demás, ni yo lo cuento \u{1F910}<br>' +
+      `4. Monto: <b>${ctx.monto || 'por definir'}</b> · Fecha: <b>${ctx.fecha || 'por definir'}</b><br><br>` +
+      'Yo mientras te doy ideas, te cuento del grupo, llevo recados, guardo lo que me cuentes y juego contigo \u{1F9DD}',
+      { sugerencias: ['¿Quiénes están?', 'Dame ideas', 'Cuéntame algo'] });
+  }
+
+  // ---- 21. "Que sabes de mi?" --------------------------------------------
   else if (RX.verLista.test(t)) {
+    intencion = 'recordar';
     const mios = await deseosDe(user.id);
     const ap = await knn.loAprendido(user.id);
     const gusta = ap.filter(a => a.tipo === 'gusta');
     const noGusta = ap.filter(a => a.tipo === 'no_gusta');
+    const recuerdos = await memoria.memoriasDe(user.id, { limite: 4 });
     r = salida(
-      `Esto es lo que sé de ti 🧠<br>` +
-      (mios.length ? `📋 Tu lista: <b>${mios.join('</b>, <b>')}</b><br>` : '📋 Tu lista está vacía.<br>') +
-      (gusta.length ? `👍 Te gusta: <b>${gusta.slice(0, 6).map(a => a.valor).join('</b>, <b>')}</b><br>` : '') +
-      (noGusta.length ? `👎 Evitar: <b>${noGusta.slice(0, 5).map(a => a.valor).join('</b>, <b>')}</b><br>` : '') +
-      `<br>Todo esto lo ve <b>solo</b> quien te sacó en el sorteo 🔒`);
+      'Esto es lo que sé de ti \u{1F9E0}<br>' +
+      (mios.length ? `\u{1F4CB} Tu lista: <b>${mios.join('</b>, <b>')}</b><br>` : '\u{1F4CB} Tu lista está vacía.<br>') +
+      (gusta.length ? `\u{1F44D} Te gusta: <b>${gusta.slice(0, 6).map(a => a.valor).join('</b>, <b>')}</b><br>` : '') +
+      (noGusta.length ? `\u{1F44E} Evitar: <b>${noGusta.slice(0, 5).map(a => a.valor).join('</b>, <b>')}</b><br>` : '') +
+      (recuerdos.length ? `\u{1F4D3} Y me pediste que recuerde: ${recuerdos.map(m => `<i>«${m.texto}»</i>`).join(', ')}<br>` : '') +
+      '<br>Todo esto lo ve <b>solo</b> quien te sacó en el sorteo \u{1F512}');
   }
 
-  // ---- 15. Cortesías ------------------------------------------------------
+  // ---- 22. Cortesias -----------------------------------------------------
   else if (RX.gracias.test(t)) {
-    r = salida(alAzar(['¡Para eso estoy! 🧝 ¿Algo más?', '¡Un gusto! Si quieres te cuento algo del grupo 🎄', '😊 Cuando quieras. ¿Jugamos algo mientras esperamos?']));
-  } else if (RX.saludo.test(t)) {
-    r = salida(
-      `¡Hola, <b>${corto(user)}</b>! 🧝 ` +
-      (ctx.sorteoHecho && amigo ? `Ya salió el sorteo, ¿te doy ideas para tu amigo secreto?`
-        : faltan > 0 ? `Vamos <b>${gente.length}</b> de <b>${ctx.max || 8}</b>, faltan ${faltan}. ¿Jugamos algo mientras?`
-        : `Ya estamos completos, el sorteo está por salir 🎲`),
-      { sugerencias: ctx.sorteoHecho ? ['Dame ideas', '¿Con quién me parezco?', 'Juguemos algo'] : ['¿Quiénes están?', 'Quiero pedir algo', 'Juguemos algo'] });
+    intencion = 'gracias';
+    evento = 'mimo';
+    r = salida(alAzar([
+      '¡Para eso estoy! \u{1F9DD} ¿Algo más?',
+      '¡Un gusto! Si quieres te cuento algo del grupo \u{1F384}',
+      '\u{1F60A} Cuando quieras. ¿Jugamos algo mientras esperamos?'
+    ]));
   }
 
-  // ---- 16. No entendí: aprendo igual --------------------------------------
-  else {
-    const cosas = extraerCosas(t);
-    if (cosas.length && t.length < 120) {
-      for (const c of cosas) await knn.aprender({ usuarioId: user.id, tipo: 'gusta', valor: c, origen: 'chat' });
-      r = salida(`Lo anoto 📝 (<b>${cosas.join('</b>, <b>')}</b>). Cuéntame más, así afino lo que te recomiendo.`);
-    } else {
-      r = salida(
-        `No te entendí del todo 😅 Pero puedo:<br>` +
-        `🎁 darte ideas de regalo · 🧮 decirte con quién te pareces · 👥 contarte del grupo · ` +
-        `💌 llevar recados · 🎲 jugar contigo`,
-        { sugerencias: ['Dame ideas', '¿Quiénes están?', '¿Con quién me parezco?', 'Juguemos algo'] });
-    }
+  else if (RX.saludo.test(t)) {
+    intencion = 'saludo';
+    const volvio = estadoPrevio.minutosAusente > 600;
+    r = salida(
+      `¡Hola, <b>${corto(user)}</b>! \u{1F9DD} ` +
+      (volvio ? '¡Te extrañé! Hace rato no venías. ' : '') +
+      (ctx.sorteoHecho && amigo ? 'Ya salió el sorteo, ¿te doy ideas para tu amigo secreto?'
+        : faltan > 0 ? `Vamos <b>${gente.length}</b> de <b>${ctx.max || 8}</b>, faltan ${faltan}. ¿Jugamos algo mientras?`
+          : 'Ya estamos completos, el sorteo está por salir \u{1F3B2}'),
+      { sugerencias: ctx.sorteoHecho ? ['Dame ideas', '¿Con quién me parezco?', 'Cuéntame algo'] : ['¿Quiénes están?', 'Quiero pedir algo', 'Cuéntame algo'] });
   }
+
+  // ---- 23. CHAT LIBRE: aqui entra el pensamiento -------------------------
+  else {
+    r = await chatLibre({ user, texto: t, sent, cp });
+    intencion = r._intencion || null;
+    evento = r._evento || null;
+    delete r._intencion; delete r._evento;
+  }
+
+  // ---- emocion y memoria del turno ---------------------------------------
+  const est = await animo.sentir(user.id, {
+    valencia: sent.valencia, intensidad: sent.intensidad, evento
+  });
+  if (!r.animo) r.animo = est;
+  memoria.anotarCorto(user.id, { preguntaAbierta: r.espera || null });
+
+  // el clasificador aprende de como habla ESTE grupo
+  if (intencion) await aprenderIntencion(t, intencion, user.id);
 
   await guardarChat(user.id, 'bot', r.texto);
   return r;
 }
 
+// --------------------------------------------------------------------------
+// CHAT LIBRE
+// --------------------------------------------------------------------------
+/**
+ * Cuando ninguna regla calza, el duende piensa en cuatro pasos:
+ *
+ *   1. CLASIFICA la intencion con Naive Bayes (nlp.js). Si el modelo esta
+ *      razonablemente seguro, atiende esa intencion.
+ *   2. RECUERDA: busca en la memoria de largo plazo de esa persona algo
+ *      parecido a lo que acaba de decir (TF-IDF + coseno).
+ *   3. CONSULTA lo que sabe del mundo (navidad.js) por el mismo metodo.
+ *   4. APRENDE: guarda lo que le contaron y responde preguntando, porque cada
+ *      respuesta es una senal nueva.
+ *
+ * Si nada de eso da pie, improvisa con su cadena de Markov personal.
+ */
+async function chatLibre({ user, texto, sent, cp }) {
+  const t = texto;
+  const cls = nlp.clasificar(t);
+  const salida = (texto, extra = {}) => ({ texto, ...extra });
+
+  // --- 1. el clasificador esta seguro: lo tratamos como esa intencion -----
+  if (cls.confianza >= 0.62) {
+    if (cls.clase === 'navidad') {
+      const ref = navidad.consultar(t, 1);
+      return salida((ref.length ? ref[0].texto : navidad.reflexion()) + '<br><br>¿Y tú qué piensas de eso?',
+        { _intencion: 'navidad', _evento: 'pensando', sugerencias: ['Cuéntame una historia', 'Guarda esto de mí'] });
+    }
+    if (cls.clase === 'contar') {
+      return salida(navidad.historia(), { _intencion: 'contar', sugerencias: ['Cuéntame otra', 'Pregúntame algo'] });
+    }
+    if (cls.clase === 'animoTriste') {
+      return salida(`Oye \u{1F917} eso no suena bien. Aquí estoy si quieres contarme.<br><i>${navidad.reflexion('tristeza')}</i>`,
+        { _intencion: 'animoTriste', sugerencias: ['Cuéntame algo bonito', 'Juguemos algo'] });
+    }
+    if (cls.clase === 'animoAlegre') {
+      return salida('¡Me contagias! \u{1F929} Cuéntame más, que todo lo bueno lo anoto.',
+        { _intencion: 'animoAlegre', _evento: 'mimo' });
+    }
+  }
+
+  // --- 2. busca en SU memoria algo parecido a lo que dijo -----------------
+  const recuerdo = t.length > 10 ? await memoria.buscar(user.id, t, { n: 1 }) : [];
+
+  // --- 3. busca en lo que sabe del mundo ---------------------------------
+  const saber = t.length > 10 ? navidad.consultar(t, 1) : [];
+
+  // --- 4. aprende de lo que le acaban de decir ---------------------------
+  const cosas = extraerCosas(t);
+  let aprendido = [];
+  if (cosas.length && t.length < 140) {
+    for (const c of cosas.slice(0, 3)) {
+      await knn.aprender({ usuarioId: user.id, tipo: 'gusta', valor: c, origen: 'chat' });
+    }
+    aprendido = cosas.slice(0, 3);
+  }
+  // si suena a dato sobre si mismo, lo guarda en la memoria larga
+  const esAfirmacion = /\b(soy|tengo|vivo|trabajo|estudio|me llamo|siempre|nunca|suelo|odio|amo|consider)\b/i.test(t);
+  if (esAfirmacion && t.length >= 12 && t.length <= 400) {
+    await memoria.recordar({ usuarioId: user.id, tipo: 'dato', texto: t, visibilidad: 'privado', animo: sent.valencia });
+  }
+
+  // --- armado de la respuesta -------------------------------------------
+  const piezas = [];
+
+  if (recuerdo.length && recuerdo[0].score >= 0.18) {
+    piezas.push(`Eso me suena \u{1F9E0} Tú me habías contado: <i>«${recuerdo[0].texto}»</i>`);
+  }
+  if (aprendido.length) {
+    piezas.push(`Lo anoto \u{1F4DD} (<b>${aprendido.join('</b>, <b>')}</b>)`);
+  } else if (esAfirmacion) {
+    piezas.push('Guardado en mi cuaderno \u{1F4D3}');
+  }
+  if (saber.length && saber[0].score >= 0.1) {
+    piezas.push(`<i>${saber[0].texto}</i>`);
+  }
+
+  // una ocurrencia improvisada, de vez en cuando, para que no suene a maquina
+  if (piezas.length && Math.random() < 0.35) {
+    const ocurrencia = await memoria.improvisar(user.id);
+    if (ocurrencia && ocurrencia.length > 25 && ocurrencia.length < 160) {
+      piezas.push(`<span class="porque">Se me ocurre algo con lo que me has ido contando: «${ocurrencia}»</span>`);
+    }
+  }
+
+  if (piezas.length) {
+    const q = navidad.pregunta();
+    return salida(
+      piezas.join('<br>') + `<br><br>${q.texto}`,
+      {
+        _evento: 'pensando',
+        espera: { tipo: 'pregunta_duende', aprende: q.aprende },
+        sugerencias: ['Cuéntame algo', '¿Qué recuerdas de mí?', 'Dame ideas']
+      });
+  }
+
+  // --- nada que agarrar: ofrece lo que sabe hacer, preguntando -----------
+  const q = navidad.pregunta();
+  return salida(
+    'No te entendí del todo \u{1F605} pero no me quiero quedar callado. Puedo:<br>' +
+    '\u{1F381} darte ideas · \u{1F9EE} decirte con quién te pareces · \u{1F465} contarte del grupo · ' +
+    '\u{1F48C} llevar recados · \u{1F9E0} guardar lo que me cuentes · \u{1F3B2} jugar · \u{1F634} irme a dormir si te molesto' +
+    `<br><br>Mientras: <b>${q.texto}</b>`,
+    {
+      espera: { tipo: 'pregunta_duende', aprende: q.aprende },
+      sugerencias: ['Dame ideas', '¿Quiénes están?', 'Cuéntame algo', 'Juguemos algo']
+    });
+}
+
+// --------------------------------------------------------------------------
+// Resumen de lo aprendido, para la pantalla de transparencia
+// --------------------------------------------------------------------------
+async function loQueSeDeTi(userId) {
+  const [recuerdos, stats, gestos, est, ap] = await Promise.all([
+    memoria.memoriasDe(userId, { limite: 10 }),
+    memoria.contar(userId),
+    gestosDe(userId),
+    animo.estado(userId),
+    knn.loAprendido(userId)
+  ]);
+  return {
+    recuerdos: recuerdos.map(m => ({
+      id: m.id, tipo: m.tipo, texto: m.texto, visibilidad: m.visibilidad,
+      veces: Number(m.veces), relevancia: m.relevancia
+    })),
+    memoria: stats,
+    gestos,
+    animo: est,
+    aprendido: ap,
+    modelo: nlp.tamanoModelo()
+  };
+}
+
 module.exports = {
   responder, historial, guardarChat, guardarDeseo, deseosDe,
   dejarRecado, recadosDe, marcarRecadoEntregado, revelaSorteo,
+  reaccionarGesto, gestosDe, loQueSeDeTi,
+  cargarAprendizaje, aprenderIntencion,
   CATALOGO: knn.CATALOGO
 };

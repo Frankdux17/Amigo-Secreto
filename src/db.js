@@ -143,6 +143,70 @@ CREATE TABLE IF NOT EXISTS recados (
 );
 CREATE INDEX IF NOT EXISTS idx_recados_para ON recados (para_id, estado);
 
+-- Memoria de largo plazo del duende. Lo que la gente le pide guardar, las
+-- historias que cuenta y su mensaje publico para el grupo.
+--   visibilidad = 'privado' -> solo se le cuenta a su dueno
+--   visibilidad = 'grupo'   -> el duende lo puede repetir si preguntan por el
+CREATE TABLE IF NOT EXISTS memorias (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  usuario_id  INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  autor_id    INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  tipo        TEXT    NOT NULL DEFAULT 'dato',
+  clave       TEXT,
+  texto       TEXT    NOT NULL,
+  visibilidad TEXT    NOT NULL DEFAULT 'privado',
+  animo       REAL    NOT NULL DEFAULT 0,
+  peso        REAL    NOT NULL DEFAULT 1,
+  veces       INTEGER NOT NULL DEFAULT 1,
+  usado       INTEGER NOT NULL DEFAULT 0,
+  creado      TEXT    NOT NULL DEFAULT (datetime('now')),
+  ultimo_uso  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_memorias_usuario ON memorias (usuario_id, tipo);
+CREATE INDEX IF NOT EXISTS idx_memorias_vis ON memorias (usuario_id, visibilidad);
+
+-- Estado emocional del duende con cada persona.
+CREATE TABLE IF NOT EXISTS animo (
+  usuario_id    INTEGER PRIMARY KEY REFERENCES usuarios(id) ON DELETE CASCADE,
+  estado        TEXT    NOT NULL DEFAULT 'contento',
+  energia       REAL    NOT NULL DEFAULT 1,
+  valencia      REAL    NOT NULL DEFAULT 0.2,
+  animo         REAL    NOT NULL DEFAULT 0.2,
+  dormido       INTEGER NOT NULL DEFAULT 0,
+  callado       INTEGER NOT NULL DEFAULT 0,
+  interacciones INTEGER NOT NULL DEFAULT 0,
+  cosquillas    INTEGER NOT NULL DEFAULT 0,
+  mimos         INTEGER NOT NULL DEFAULT 0,
+  visto         TEXT,
+  creado        TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Cognicion visual: lo que el duende "ve" en la pagina (el mouse encima, una
+-- sacudida, una caricia, cuanto rato llevas sin moverte). Se guarda para que
+-- aprenda con que gestos reacciona cada persona.
+CREATE TABLE IF NOT EXISTS gestos (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  usuario_id  INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  gesto       TEXT    NOT NULL,
+  dato        TEXT,
+  veces       INTEGER NOT NULL DEFAULT 1,
+  creado      TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_gestos_usuario ON gestos (usuario_id, gesto);
+
+-- Corpus de entrenamiento del clasificador de intenciones (Naive Bayes).
+-- Cada frase que una regla acierta se guarda aqui y se vuelve a cargar en el
+-- arranque, para que el duende entienda cada vez mejor como habla este grupo.
+CREATE TABLE IF NOT EXISTS intenciones (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  texto      TEXT    NOT NULL,
+  intencion  TEXT    NOT NULL,
+  origen     TEXT    NOT NULL DEFAULT 'uso',
+  usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  creado     TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_intenciones ON intenciones (intencion);
+
 `;
 
 // ---------- configuración (en memoria, se lee muchas veces) ----------
@@ -197,7 +261,20 @@ const COLUMNAS_ESPERADAS = {
   },
   sorteo: { visto: 'INTEGER NOT NULL DEFAULT 0' },
   senales: { autor_id: 'INTEGER', origen: "TEXT NOT NULL DEFAULT 'chat'", peso: 'REAL NOT NULL DEFAULT 1' },
-  recados: { anonimo: 'INTEGER NOT NULL DEFAULT 0', respuesta: 'TEXT', entregado: 'TEXT' }
+  recados: { anonimo: 'INTEGER NOT NULL DEFAULT 0', respuesta: 'TEXT', entregado: 'TEXT' },
+  memorias: {
+    autor_id: 'INTEGER', clave: 'TEXT', visibilidad: "TEXT NOT NULL DEFAULT 'privado'",
+    animo: 'REAL NOT NULL DEFAULT 0', peso: 'REAL NOT NULL DEFAULT 1',
+    veces: 'INTEGER NOT NULL DEFAULT 1', usado: 'INTEGER NOT NULL DEFAULT 0', ultimo_uso: 'TEXT'
+  },
+  animo: {
+    energia: 'REAL NOT NULL DEFAULT 1', valencia: 'REAL NOT NULL DEFAULT 0.2',
+    animo: 'REAL NOT NULL DEFAULT 0.2', dormido: 'INTEGER NOT NULL DEFAULT 0',
+    callado: 'INTEGER NOT NULL DEFAULT 0', interacciones: 'INTEGER NOT NULL DEFAULT 0',
+    cosquillas: 'INTEGER NOT NULL DEFAULT 0', mimos: 'INTEGER NOT NULL DEFAULT 0', visto: 'TEXT'
+  },
+  gestos: { dato: 'TEXT', veces: 'INTEGER NOT NULL DEFAULT 1' },
+  intenciones: { origen: "TEXT NOT NULL DEFAULT 'uso'", usuario_id: 'INTEGER' }
 };
 
 async function migrarColumnas() {
