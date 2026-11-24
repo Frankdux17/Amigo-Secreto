@@ -433,7 +433,13 @@ app.get('/api/estado', pedirLogin, A(async (req, res) => {
     amigo,
     recados,
     // estado emocional del duende con esta persona: la cara que pone al entrar
-    animo: await animo.estado(yo.id)
+    animo: await animo.estado(yo.id),
+    // y lo que se le ocurre decirte sin que le preguntes
+    nota: yo.rol === 'participante'
+      ? await bot.mensajeEspontaneo(yo, {
+          total: c.total, max: c.max, sorteoHecho: sorteo.sorteoHecho()
+        })
+      : null
   });
 }));
 
@@ -481,7 +487,11 @@ app.post('/api/bot', pedirLogin, A(async (req, res) => {
 //  acarician, lo sacuden o cuando llevas rato sin moverte. Eso se traduce en
 //  emocion y en una frase. No hay camara: "ver" es percibir la pagina.
 // ------------------------------------------------------------
-const GESTOS_VALIDOS = new Set(['hover', 'caricia', 'cosquillas', 'sacudida', 'vuelta', 'ausencia', 'regreso']);
+const GESTOS_VALIDOS = new Set([
+  'hover', 'caricia', 'cosquillas', 'sacudida', 'vuelta', 'ausencia', 'regreso',
+  // el juego de pillarlo y lo que ve de su propia pagina
+  'esquive', 'pillado', 'zona'
+]);
 
 app.post('/api/gesto', pedirLogin, A(async (req, res) => {
   const gesto = String(req.body.gesto || '').trim();
@@ -535,6 +545,19 @@ app.post('/api/duende/estado', pedirLogin, A(async (req, res) => {
   else if (accion === 'hablar') est = await animo.callar(req.yo.id, false);
   else return res.status(400).json({ error: 'Accion no valida.' });
   res.json({ ok: true, animo: est });
+}));
+
+/**
+ * Lo que el duende dice por iniciativa propia: un consejo, un recuerdo tuyo,
+ * algo del grupo o una idea de Navidad. El navegador lo pide cada tanto si la
+ * persona lleva un rato sin escribir, para que no sea un chat que solo espera.
+ */
+app.get('/api/duende/nota', pedirLogin, A(async (req, res) => {
+  const c = await cupo();
+  const nota = await bot.mensajeEspontaneo(req.yo, {
+    total: c.total, max: c.max, sorteoHecho: sorteo.sorteoHecho()
+  });
+  res.json({ ok: true, nota });
 }));
 
 

@@ -119,6 +119,69 @@ function levenshtein(a, b) {
   return previa[b.length];
 }
 
+/**
+ * Ratio de difflib.SequenceMatcher, portado de Python.
+ *
+ * Es la medida que uso en TecniBot para corregir lo mal escrito, y no es lo
+ * mismo que Levenshtein: aqui se suman las longitudes de los bloques que
+ * COINCIDEN y se divide entre el total de caracteres de las dos palabras,
+ *   ratio = 2 * M / T
+ * donde M son los caracteres emparejados. Por eso "qemado"/"quemado" sale muy
+ * alto (comparten el bloque "emado") aunque falte una letra en medio.
+ */
+function bloquesIguales(a, b, i1, i2, j1, j2, acum) {
+  // bloque comun mas largo entre a[i1..i2) y b[j1..j2)
+  let mejorI = i1, mejorJ = j1, mejorN = 0;
+  for (let i = i1; i < i2; i++) {
+    for (let j = j1; j < j2; j++) {
+      let n = 0;
+      while (i + n < i2 && j + n < j2 && a[i + n] === b[j + n]) n++;
+      if (n > mejorN) { mejorN = n; mejorI = i; mejorJ = j; }
+    }
+  }
+  if (!mejorN) return acum;
+  // a la izquierda y a la derecha del bloque, se busca recursivamente
+  acum = bloquesIguales(a, b, i1, mejorI, j1, mejorJ, acum);
+  acum += mejorN;
+  return bloquesIguales(a, b, mejorI + mejorN, i2, mejorJ + mejorN, j2, acum);
+}
+
+function ratio(a, b) {
+  const x = norm(a), y = norm(b);
+  const total = x.length + y.length;
+  if (!total) return 1;
+  if (x === y) return 1;
+  return (2 * bloquesIguales(x, y, 0, x.length, 0, y.length, 0)) / total;
+}
+
+/**
+ * Equivalente de difflib.get_close_matches(n=1): la palabra del vocabulario
+ * mas parecida, si pasa el umbral. Se usa para corregir lo que el usuario
+ * escribio mal antes de intentar entenderlo.
+ */
+function masParecida(palabra, vocabulario, corte) {
+  const umbral = corte === undefined ? 0.82 : corte;
+  let mejor = null, mejorR = umbral;
+  for (const v of vocabulario) {
+    const r = ratio(palabra, v);
+    if (r >= mejorR) { mejorR = r; mejor = v; }
+  }
+  return mejor ? { palabra: mejor, ratio: Number(mejorR.toFixed(3)) } : null;
+}
+
+/**
+ * Combinacion de certezas de MYCIN:  FC = a + b * (1 - a)
+ *
+ * Dos evidencias independientes de lo mismo se refuerzan sin pasarse de 1:
+ * si el perfil dice que le gusta el cafe (0.7) y ademas lo dijo en el chat
+ * (0.6), la certeza combinada es 0.88, no 1.3.
+ */
+function combinarCerteza(a, b) {
+  const x = Math.max(0, Math.min(1, a || 0));
+  const y = Math.max(0, Math.min(1, b || 0));
+  return Number((x + y * (1 - x)).toFixed(4));
+}
+
 /** 0..1, cuanto se parecen dos palabras. */
 function parecido(a, b) {
   const largo = Math.max(norm(a).length, norm(b).length);
@@ -146,15 +209,52 @@ function contieneParecido(pajar, aguja, umbral) {
 //    El buscador de recuerdos: "te acuerdas de lo que te conte del viaje?"
 // ---------------------------------------------------------------------------
 
+/**
+ * N-gramas de letras, al estilo de analyzer="char_wb" de scikit-learn.
+ *
+ * Cada palabra se rodea de espacios y se parte en trozos de n letras. Es mas
+ * tolerante que trabajar con palabras enteras: "parpadea" y "parpadeo"
+ * comparten casi todos sus trozos, y "chcolate" sigue pareciendose a
+ * "chocolate" aunque falte una letra. Por eso aguanta la forma de escribir de
+ * cada persona sin tener que listar todas las variantes.
+ */
+function ngramasLetras(texto, min, max) {
+  const desde = min || 3, hasta = max || 5;
+  const salida = [];
+  for (const palabra of norm(texto).replace(/[^a-z0-9ñ\s]/g, ' ').split(/\s+/)) {
+    if (!palabra) continue;
+    const p = ' ' + palabra + ' ';
+    for (let n = desde; n <= hasta; n++) {
+      if (p.length < n) break;
+      for (let i = 0; i + n <= p.length; i++) salida.push(p.slice(i, i + n));
+    }
+  }
+  return salida;
+}
+
 class TfIdf {
-  constructor() {
+  /**
+   * @param {object} opciones
+   *   analizador: 'palabra' (por defecto, tokens + bigramas) o 'letra'
+   *               (n-gramas de caracteres, que aguantan faltas de ortografia)
+   */
+  constructor(opciones) {
+    this.analizador = (opciones && opciones.analizador) || 'palabra';
+    this.n = (opciones && opciones.n) || [3, 5];
     this.docs = [];        // { id, meta, texto, tf: Map(termino -> frecuencia) }
     this.df = new Map();   // termino -> en cuantos documentos aparece
     this._cache = new Map();
   }
 
+  /** Los rasgos con los que trabaja este indice, segun su analizador. */
+  rasgosDe(texto) {
+    return this.analizador === 'letra'
+      ? ngramasLetras(texto, this.n[0], this.n[1])
+      : rasgos(texto);
+  }
+
   agregar(id, texto, meta) {
-    const t = rasgos(texto);
+    const t = this.rasgosDe(texto);
     if (!t.length) return;
     const tf = new Map();
     for (const x of t) tf.set(x, (tf.get(x) || 0) + 1);
@@ -200,7 +300,7 @@ class TfIdf {
   buscar(consulta, n, minimo) {
     const cuantos = n === undefined ? 3 : n;
     const umbral = minimo === undefined ? 0.08 : minimo;
-    const t = rasgos(consulta);
+    const t = this.rasgosDe(consulta);
     if (!t.length || !this.docs.length) return [];
     const tf = new Map();
     for (const x of t) tf.set(x, (tf.get(x) || 0) + 1);
@@ -600,10 +700,10 @@ function aTercera(texto) {
 module.exports = {
   // texto
   sinTildes, norm, stem, tokenizar, bigramas, rasgos, VACIAS,
-  // distancias
-  levenshtein, parecido, contieneParecido,
+  // distancias y certezas
+  levenshtein, parecido, contieneParecido, ratio, masParecida, combinarCerteza,
   // recuperacion
-  TfIdf,
+  TfIdf, ngramasLetras,
   // intenciones
   NaiveBayes, clasificador, clasificar, entrenarIntencion, tamanoModelo, SEMILLAS,
   // sentimiento

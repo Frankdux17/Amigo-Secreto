@@ -226,6 +226,7 @@
     raton = { x: e.clientX, y: e.clientY };
     pedirMirada();
     registrarTrazo(e.clientX, e.clientY);
+    vigilarPersecucion(e.clientX, e.clientY);
     hayVida();
   }, { passive: true });
 
@@ -255,6 +256,135 @@
       lanzador.addEventListener(ev, () => clearTimeout(relojToque), { passive: true }));
   }
 
+  // ==========================================================
+  //  5. EL JUEGO DE PILLARLO
+  // ==========================================================
+  // Si el cursor se le viene encima, el duende se aparta de un brinco. No
+  // siempre: a la tercera se deja pillar y se rie, porque un duende que nunca
+  // se deja atrapar deja de tener gracia.
+  //
+  // Se mide la distancia del cursor al centro del muneco y la VELOCIDAD con la
+  // que se acerca: acercarse despacio es una caricia (eso ya lo ve el trazo),
+  // venirsele encima rapido es perseguirlo.
+
+  const CERCA = 90;             // px: a esta distancia ya lo esta tocando
+  const RAPIDO = 0.55;          // px/ms de acercamiento para que cuente
+
+  let esquives = 0;            // seguidos, se reinicia al dejarse pillar
+  let totalEsquives = 0;       // acumulado, solo para poder comprobarlo
+  let distanciaPrevia = null;
+  let tiempoPrevio = 0;
+  let ultimoEsquive = 0;
+  let relojEsquive = null;
+
+  function centroDelMuneco() {
+    const r = svgVisible();
+    if (!r) return null;
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+
+  function esquivar(hacia) {
+    // un brinco corto y de vuelta: no se mueve de su esquina, solo se aparta
+    widget.classList.add('esquivando');
+    widget.style.setProperty('--esquive-x', (hacia > 0 ? 54 : -54) + 'px');
+    widget.style.setProperty('--esquive-r', (hacia > 0 ? 9 : -9) + 'deg');
+    clearTimeout(relojEsquive);
+    relojEsquive = setTimeout(() => {
+      widget.classList.remove('esquivando');
+      widget.style.removeProperty('--esquive-x');
+      widget.style.removeProperty('--esquive-r');
+    }, 620);
+  }
+
+  function vigilarPersecucion(x, y) {
+    if (quieto) return;
+    const P = puente();
+    if (!P || P.dormido() || P.abierto()) return;
+
+    const c = centroDelMuneco();
+    if (!c) return;
+
+    const d = Math.hypot(x - c.x, y - c.y);
+    const ahora = Date.now();
+    const dt = ahora - tiempoPrevio;
+
+    // Varios movimientos pueden llegar en el mismo milisegundo (un raton
+    // rapido, o eventos sinteticos). Si se exigiera dt > 0 esos se perderian,
+    // que es justo cuando mas deprisa viene el cursor. Se toma un minimo de
+    // 8 ms, que es mas o menos un fotograma.
+    if (distanciaPrevia !== null && dt >= 0 && dt < 260) {
+      const acercamiento = (distanciaPrevia - d) / Math.max(dt, 8);   // px/ms, positivo = viene
+      if (d < CERCA && acercamiento > RAPIDO && ahora - ultimoEsquive > 900) {
+        ultimoEsquive = ahora;
+        esquives++;
+        totalEsquives++;
+        if (esquives >= 3) {
+          esquives = 0;
+          avisar('pillado', 'me atrapo tras ' + '3 intentos');
+        } else {
+          esquivar(x < c.x ? 1 : -1);          // se aparta al lado contrario
+          avisar('esquive', 'intento ' + esquives);
+        }
+      }
+    }
+    distanciaPrevia = d;
+    tiempoPrevio = ahora;
+  }
+
+  // si deja de perseguirlo un rato, el duende se relaja y vuelve a empezar
+  setInterval(() => {
+    if (Date.now() - ultimoEsquive > 12000) esquives = 0;
+  }, 6000);
+
+  // ==========================================================
+  //  6. SU ENTORNO: en que parte de la pagina esta la persona
+  // ==========================================================
+  // El duende no ve la habitacion, pero si ve SU pagina. Saber en que seccion
+  // anda la persona le permite decir algo con sentido en vez de una frase
+  // suelta: si lleva un rato mirando la lista de amigos, comenta eso.
+
+  const ZONAS = [
+    { sel: '[data-zona="amigo"], .tarjeta-amigo, #mi-amigo', zona: 'amigo' },
+    { sel: '[data-zona="grupo"], .lista-amigos, #participantes', zona: 'grupo' },
+    { sel: '[data-zona="perfil"], form[action*="perfil"], #mi-perfil', zona: 'perfil' },
+    { sel: '[data-zona="evento"], #evento, .datos-evento', zona: 'evento' }
+  ];
+
+  let zonaActual = null;
+  let desdeCuando = 0;
+
+  function zonaVisible() {
+    const alto = window.innerHeight;
+    for (const z of ZONAS) {
+      for (const el of document.querySelectorAll(z.sel)) {
+        const r = el.getBoundingClientRect();
+        // visible y ocupando de verdad la pantalla, no asomando una esquina
+        if (r.top < alto * 0.75 && r.bottom > alto * 0.25) return z.zona;
+      }
+    }
+    return null;
+  }
+
+  function vigilarEntorno() {
+    const P = puente();
+    if (!P || P.dormido() || P.abierto() || document.hidden) return;
+    const z = zonaVisible();
+    if (z !== zonaActual) {
+      zonaActual = z;
+      desdeCuando = Date.now();
+      return;
+    }
+    // lleva 8 segundos largos en la misma zona: ahi si tiene algo que decir
+    if (z && Date.now() - desdeCuando > 8000) {
+      desdeCuando = Date.now() + 60000;        // y no lo repite en un minuto
+      avisar('zona', z);
+    }
+  }
+  setInterval(vigilarEntorno, 2500);
+
   // queda a mano para depurar desde la consola
-  window.DuendeVision = { avisar, estado: () => ({ ausente, trazo: trazo.length, raton }) };
+  window.DuendeVision = {
+    avisar,
+    estado: () => ({ ausente, trazo: trazo.length, raton, esquives, totalEsquives, zona: zonaActual })
+  };
 })();

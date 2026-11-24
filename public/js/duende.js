@@ -431,8 +431,8 @@
   /** Chips de sugerencia. El servidor manda las suyas según la conversación. */
   function chips(lista) {
     const porDefecto = estado && estado.amigo
-      ? ['🎁 Dame ideas', '👀 ¿Qué le gusta?', '🧮 ¿Con quién me parezco?', '🧠 Guarda esto de mí', '📖 Si alguien pregunta por mí…', '🎲 Juguemos algo', '💭 Cuéntame algo']
-      : ['👥 ¿Quiénes están?', '✍️ Quiero pedir algo', '🧠 Guarda esto de mí', '📖 Si alguien pregunta por mí…', '🧮 ¿Con quién me parezco?', '🎲 Juguemos algo', '💭 Cuéntame algo'];
+      ? ['🎁 Dame ideas', '💡 Dame un consejo', '👀 ¿Qué le gusta?', '🧮 ¿Con quién me parezco?', '🧠 Guarda esto de mí', '📖 Si alguien pregunta por mí…', '🎲 Juguemos algo', '💭 Cuéntame algo']
+      : ['💡 Dame un consejo', '👥 ¿Quiénes están?', '✍️ Quiero pedir algo', '🧠 Guarda esto de mí', '📖 Si alguien pregunta por mí…', '🧮 ¿Con quién me parezco?', '🎲 Juguemos algo', '💭 Cuéntame algo'];
     const usar = (lista && lista.length) ? lista : porDefecto;
 
     sugerencias.innerHTML = '';
@@ -837,6 +837,40 @@
     humor: () => humor
   };
 
+  // ==========================================================
+  //  LO QUE EL DUENDE DICE POR SU CUENTA
+  // ==========================================================
+  // El servidor decide QUE decir (ahi estan la memoria, el perfil y lo que le
+  // falta); aqui solo se decide CUANDO, que es cuestion de no molestar: nunca
+  // con el chat abierto, nunca dormido y nunca pisando otro aviso.
+
+  let ultimaNota = 0;
+
+  function mostrarNota(nota) {
+    if (!nota || !nota.texto) return false;
+    if (panel.classList.contains('abierto')) return false;
+    if (humor && humor.dormido) return false;
+    ultimaNota = Date.now();
+    globo.classList.add('es-nota');
+    decir(nota.texto, 11000);
+    setTimeout(() => globo.classList.remove('es-nota'), 11200);
+    return true;
+  }
+
+  /** Le pregunta al duende si se le ocurre algo que decir. */
+  async function pedirNota() {
+    if (document.hidden) return;
+    if (panel.classList.contains('abierto')) return;
+    if (humor && humor.dormido) return;
+    if (Date.now() - ultimaNota < 90000) return;      // como maximo cada minuto y medio
+    try {
+      const r = await fetch('/api/duende/nota', { headers: { accept: 'application/json' } });
+      if (!r.ok) return;
+      const d = await r.json();
+      mostrarNota(d.nota);
+    } catch (e) { /* sin red, el duende se calla */ }
+  }
+
   // -------------------------------------------------- arranque
   fetch('/api/estado', { headers: { accept: 'application/json' } })
     .then(r => r.ok ? r.json() : null)
@@ -861,6 +895,16 @@
           `💌 Tienes <b>${estado.recados.length}</b> recado(s) del grupo. ¡Ábreme y te los cuento!`, 9000), 2400);
       }
       arrancarPaseo();
+
+      // y lo que se le ocurrio decirte al verte entrar: va despues de los
+      // avisos del sistema para no atropellarlos
+      if (estado.nota) {
+        const espera = (estado.recados && estado.recados.length) ? 12000
+          : (estado.amigo && !estado.visto) ? 9000 : 4200;
+        setTimeout(() => mostrarNota(estado.nota), espera);
+      }
+      // cada tanto vuelve a pensar si tiene algo que decir
+      setInterval(pedirNota, 150000);
     })
     .catch(() => {});
 })();

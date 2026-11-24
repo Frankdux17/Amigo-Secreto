@@ -180,3 +180,39 @@
   .d-pupilas { transition: none; }
   .duende-widget .duende { transition: none; }
 }
+
+
+/* ==========================================================
+   EL BRINCO PARA ESQUIVAR EL CURSOR
+   ==========================================================
+   El duende no se va de su esquina: se aparta de un salto y vuelve. El
+   desplazamiento lo decide vision.js en --esquive-x, asi el mismo gesto sirve
+   para apartarse a izquierda o a derecha.
+
+   Va sobre .duende-lanzador y no sobre el widget, para no pelearse con el
+   translate del paseo, que vive en el widget. */
+.duende-widget .duende-lanzador {
+  transition: transform .18s cubic-bezier(.34, 1.56, .64, 1);
+}
+.duende-widget.esquivando .duende-lanzador {
+  /* El giro va en una variable propia y en GRADOS. No se puede sacar de
+     --esquive-x con calc(): multiplicar px por un numero da px, no deg, y una
+     sola unidad mal puesta hace que el navegador tire la declaracion entera y
+     el brinco no se vea. */
+  transform: translate(var(--esquive-x, 40px), -9px) rotate(var(--esquive-r, 8deg));
+}
+
+/* La nota con la que te recibe, un pelin distinta del aviso normal: lleva
+   borde dorado para que se note que es cosa suya, no del sistema. */
+.duende-globo.es-nota {
+  border-color: var(--oro, #e8b84b);
+  box-shadow: 0 10px 30px rgba(232, 184, 75, .28);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .duende-widget .duende-lanzador,
+  .duende-widget.esquivando .duende-lanzador {
+    transition: none;
+    transform: none;
+  }
+}

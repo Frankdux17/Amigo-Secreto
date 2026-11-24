@@ -40,6 +40,7 @@ const knn = require('./knn');
 const nlp = require('./nlp');
 const memoria = require('./memoria');
 const animo = require('./animo');
+const comprension = require('./comprension');
 const navidad = require('./navidad');
 
 const norm = nlp.norm;
@@ -51,7 +52,7 @@ const alAzar = (a) => a[Math.floor(Math.random() * a.length)];
 // especificas. Las reglas resuelven lo frecuente; lo demas lo decide el
 // clasificador Naive Bayes de nlp.js.
 // --------------------------------------------------------------------------
-const RX = {
+const RX_BASE = {
   // ordenes sobre su propio estado
   despertar:   /\b(despierta|desp[ií]ertate|despiertate|ya despierta|lev[aá]ntate|levantate|sal de ah[ií]|te llamo|te estoy llamando|regresa|vuelve ac[aá])\b/i,
   dormir:      /\b(vete a dormir|v[eé] a dormir|anda a dormir|a dormir|du[eé]rmete|duermete|duerme|descansa|desc[aá]nsate|t[oó]mate un descanso|toma un descanso)\b/i,
@@ -98,6 +99,81 @@ const RX = {
   gracias:     /\b(gracias|genial|buenaz|excelente|perfecto|te quiero|eres lo m[aá]ximo|crack)\b/i,
   saludo:      /\b(hola|buenas|hey|qu[eé] tal|holi|saludos|buen d[ií]a|buenas tardes|buenas noches)\b/i
 };
+
+// --------------------------------------------------------------------------
+// DOS PISOS PARA ENTENDER: la expresion literal y, si falla, la comprension
+// --------------------------------------------------------------------------
+//
+// Las expresiones de arriba son rapidas y exactas, pero fragiles: no aguantan
+// "a kien le toco", "vete adormir", "ke me recomiendas pa mi amix", ni una
+// negacion puesta en medio. El modulo comprension.js, adaptado del analizador
+// de lenguaje de TecniBot, si: normaliza, parte la frase en clausulas, corrige
+// lo mal escrito con el ratio de difflib, trabaja con raices y mira las
+// negaciones y las dudas.
+//
+// Asi que cada entrada de RX deja de ser una expresion suelta y pasa a ser un
+// detector de dos pisos. Primero el literal, que es barato; si no engancha, el
+// comprensivo, que trae certeza. Las ramas de abajo no se enteran de nada:
+// siguen preguntando RX.algo.test(t) como siempre.
+
+let _ultimoTexto = null;
+let _ultimoAnalisis = null;
+
+/** Analiza el texto una vez por turno, aunque lo pregunten 25 ramas. */
+function analizar(texto) {
+  const t = String(texto || '');
+  if (t !== _ultimoTexto) {
+    _ultimoTexto = t;
+    _ultimoAnalisis = comprension.comprender(t);
+  }
+  return _ultimoAnalisis;
+}
+
+function detector(regex, hechoNombre, minimo) {
+  const tope = minimo === undefined ? 0.6 : minimo;
+  return {
+    regex,
+    hecho: hechoNombre,
+    /** Lo dijo, escrito como sea. */
+    test(texto) {
+      if (regex && regex.test(texto)) return true;
+      if (!hechoNombre) return false;
+      const h = analizar(texto).hechos[hechoNombre];
+      return !!(h && h.certeza >= tope);
+    },
+    /** 0..1: cuanta confianza hay en que lo dijo (1 si engancho el literal). */
+    certeza(texto) {
+      if (regex && regex.test(texto)) return 1;
+      if (!hechoNombre) return 0;
+      const h = analizar(texto).hechos[hechoNombre];
+      return h ? h.certeza : 0;
+    }
+  };
+}
+
+/** Que entrada de RX se corresponde con que hecho del lexico de comprension. */
+const EQUIVALE = {
+  despertar: 'despertar', dormir: 'dormir', callar: 'callar', hablarYa: 'hablarYa',
+  fisgon: 'fisgon',
+  recordar: 'recordar', guardar: 'guardar', recadoPub: 'recadoPublico', olvida: 'olvidar',
+  recado: 'recado', cosquillas: 'cosquillas', afinidad: 'afinidad', grupo: 'grupo',
+  quienEs: 'quienEs', juego: 'jugar',
+  ideas: 'ideas', navidad: 'navidad', contar: 'contar',
+  presupuesto: 'presupuesto', fecha: 'fechaEvento', reglas: 'reglas', verLista: 'miLista',
+  gracias: 'gracias', saludo: 'saludo'
+};
+
+const RX = {};
+for (const nombre of Object.keys(RX_BASE)) {
+  RX[nombre] = detector(RX_BASE[nombre], EQUIVALE[nombre]);
+}
+
+// Dos intenciones que solo existen en el lexico comprensivo: no tienen
+// expresion literal porque se dicen de demasiadas formas distintas.
+RX.consejo = detector(null, 'consejo');
+RX.triste = detector(null, 'triste');
+RX.feliz = detector(null, 'feliz');
+
 
 // --------------------------------------------------------------------------
 // Guardas de privacidad
@@ -198,6 +274,76 @@ async function cargarAprendizaje() {
 // --------------------------------------------------------------------------
 
 /** Extrae lo que sigue a un verbo: "quiero una taza y un libro" -> [taza, libro] */
+/**
+ * Lo que viene detras de "quiero" y NO es un gusto, sino una peticion al
+ * duende: "quiero ideas", "quiero saber la fecha", "quiero que me cuentes".
+ * Sin esto, el duende apuntaria "ideas de regalo" como si fuera un deseo.
+ */
+const META = /^(ideas?|sugerencias?|recomendacion|regalos?|saber|preguntar|que me cuentes|que me digas|contarte|decirte|hablar|jugar|un juego|ayuda|la fecha|el monto|el lugar|las reglas|mi lista|dormir|descansar|eso|esto|algo|nada|lo mismo)/i;
+
+/**
+ * "Por si acaso: lei «rgalo» como «regalo»".
+ *
+ * Que el duende ensene lo que corrigio sirve para dos cosas: la persona ve que
+ * la entendio (y no que acerto de casualidad) y puede desmentirlo si leyo mal.
+ */
+function notaDeLectura(comp) {
+  if (!comp || !comp.correcciones.length) return '';
+  const vistas = [];
+  for (const c of comp.correcciones) {
+    const par = c.mala + '|' + c.buena;
+    if (c.mala !== c.buena && vistas.indexOf(par) < 0) vistas.push(par);
+  }
+  if (!vistas.length) return '';
+  const trozos = vistas.slice(0, 2).map(v => {
+    const par = v.split('|');
+    return '«' + par[0] + '» como «' + par[1] + '»';
+  });
+  return `<br><span class="porque">Por si acaso: leí ${trozos.join(' y ')} \u{1F440}</span>`;
+}
+
+/**
+ * ENCADENAMIENTO HACIA ATRAS (el modulo 3 de TecniBot, traido aqui).
+ *
+ * Un sistema experto tonto pregunta las 18 preguntas del cuestionario. Uno con
+ * experiencia parte de la CONCLUSION a la que quiere llegar y mira que dato le
+ * falta para alcanzarla.
+ *
+ * Aqui la conclusion es "puedo recomendar un regalo buenisimo para esta
+ * persona". Estas son sus condiciones, con lo que aporta cada una. Se devuelve
+ * solo lo que falta, lo mas valioso primero, para preguntar UNA cosa en vez de
+ * siete.
+ */
+const CONDICIONES_REGALO = [
+  { clave: 'deseo1', valor: 1.0, min: 2, falta: 'no me has pedido nada concreto',
+    pide: '¿Qué te gustaría recibir? Dime una cosa y la anoto' },
+  { clave: 'gustos', valor: 0.9, min: 3, falta: 'no sé qué te gusta',
+    pide: 'Cuéntame dos o tres cosas que te gusten de verdad' },
+  { clave: 'hobbies', valor: 0.7, min: 3, falta: 'no sé en qué se te va el tiempo libre',
+    pide: '¿Qué haces cuando no trabajas?' },
+  { clave: 'no_gustos', valor: 0.6, min: 3, falta: 'no sé qué NO te gusta',
+    pide: 'Dime algo que no soportes, así nadie te lo regala' },
+  { clave: 'talla_ropa', valor: 0.5, min: 1, falta: 'no tengo tu talla',
+    pide: '¿Qué talla usas? (por si te regalan ropa)' },
+  { clave: 'color_favorito', valor: 0.3, min: 3, falta: 'no sé tu color',
+    pide: '¿Cuál es tu color favorito?' }
+];
+
+/** Que le falta al perfil de alguien, lo que mas pesa primero. */
+function queFalta(persona, deseos) {
+  const tiene = {
+    deseo1: (deseos && deseos.length) ? 'si' : (persona.deseo1 || ''),
+    gustos: persona.gustos || '',
+    hobbies: persona.hobbies || '',
+    no_gustos: persona.no_gustos || '',
+    talla_ropa: persona.talla_ropa || '',
+    color_favorito: persona.color_favorito || ''
+  };
+  return CONDICIONES_REGALO
+    .filter(c => String(tiene[c.clave] || '').trim().length < (c.min || 2))
+    .sort((a, b) => b.valor - a.valor);
+}
+
 function extraerCosas(texto) {
   const t = String(texto)
     .replace(/.*\b(quiero|quisiera|me gustar[ií]a|me encanta[n]?|me gusta[n]?|me fascina[n]?|s[uú]beme|an[oó]tame|ap[uú]ntame|no me gusta[n]?|odio|detesto|no quiero|no soporto)\b/i, '')
@@ -361,6 +507,32 @@ const REACCIONES_GESTO = {
       'Llevas un rato sin decirme nada \u{1F614} ¿todo bien?'
     ]
   },
+  // El cursor se le vino encima y se aparto de un brinco
+  esquive: {
+    evento: 'travesura',
+    frases: [
+      '\u{1F605} ¡casi! pero no me pillas',
+      '¡Uy! \u{1F604} por poquito',
+      'Jajaja \u{1F60B} soy rapidito, ¿eh?',
+      '¡Ehh! \u{1F62C} a mí no se me agarra tan fácil'
+    ]
+  },
+  // a la tercera se deja atrapar: un duende que nunca se deja pillar aburre
+  // (el evento es 'cosquillas' porque es el que la maquina de emociones
+  // traduce a risa; 'risa' es el nombre del ESTADO, no del evento)
+  pillado: {
+    evento: 'cosquillas',
+    frases: [
+      '¡Ya, ya, me pillaste! \u{1F923} me rindo',
+      '¡AAAH me atrapaste! \u{1F606} bueno, me dejé un poquito',
+      'Me cazaste \u{1F602} ahora te toca contarme algo tú'
+    ]
+  },
+  // lleva un rato mirando la misma parte de la pagina
+  zona: {
+    evento: null,
+    frases: ['\u{1F440} te veo mirando ahí…']
+  },
   regreso: {
     evento: null,
     frases: [
@@ -371,8 +543,44 @@ const REACCIONES_GESTO = {
   }
 };
 
+/**
+ * Lo que el duende dice cuando ve a alguien parado un rato en una parte de la
+ * pagina. No es adivinar: es mirar su propia pagina y comentar lo que hay ahi.
+ */
+const POR_ZONA = {
+  amigo: [
+    'Te veo mirando a tu amigo secreto \u{1F440} ¿te doy ideas de regalo?',
+    '¿Pensando qué regalarle? \u{1F381} Pídeme ideas y te las calculo',
+    'Lleva un rato ahí \u{1F60A} Si quieres te cuento más de sus gustos'
+  ],
+  grupo: [
+    'Esa es la pandilla \u{1F49B} ¿quieres que te diga con quién te pareces más?',
+    'Mirando al grupo \u{1F440} Puedo contarte de cualquiera de ellos',
+    '¿Buscas a alguien? \u{1F9DD} Dime un nombre y te lo describo'
+  ],
+  perfil: [
+    'Estás en tu perfil \u{1F4DD} Todo lo que pongas ahí le sirve a quien te saque',
+    'Buen momento para completarlo \u{2728} ¿te digo qué te falta?',
+    'Ojo, que ahí es donde te conocen \u{1F60A}'
+  ],
+  evento: [
+    'Ahí están los datos del encuentro \u{1F4C5} ¿te los repito?',
+    'La fecha y el lugar \u{1F384} Yo ya tengo el gorro listo'
+  ]
+};
+
 async function reaccionarGesto(userId, gesto, dato = null) {
   const r = REACCIONES_GESTO[gesto];
+  // la zona de la pagina decide la frase, no el azar
+  if (gesto === 'zona') {
+    const lista = POR_ZONA[String(dato || '').trim()];
+    if (!lista) return null;
+    await run(
+      `INSERT INTO gestos (usuario_id, gesto, dato, veces) VALUES (?, ?, ?, 1)`,
+      [userId, 'zona', String(dato).slice(0, 40)]
+    );
+    return { texto: alAzar(lista), animo: await animo.estado(userId), gesto: 'zona' };
+  }
   if (!r) return null;
 
   // se guarda para que aprenda con que gestos reacciona mas cada persona
@@ -411,6 +619,11 @@ async function responder({ user, amigo, texto, ctx = {}, espera = null }) {
 
   // ---- percepcion: que siente este mensaje, y en que veniamos -------------
   const sent = nlp.sentimiento(t);
+
+  // Lo que el duende ENTENDIO de la frase: intenciones con certeza, gustos ya
+  // con el signo de la negacion aplicado, datos (talla, presupuesto) y la
+  // lista de lo que tuvo que corregir para llegar hasta ahi.
+  const comp = analizar(t);
   const cp = memoria.turnoCorto(user.id, t, sent.valencia);
   const estadoPrevio = await animo.estado(user.id);
 
@@ -531,6 +744,46 @@ async function responder({ user, amigo, texto, ctx = {}, espera = null }) {
       `Gracias por contarme \u{1F49B} Ya lo guardé en mi cuaderno (van <b>${stats.total}</b> cosas tuyas).<br>` +
       alAzar(['¿Te pregunto otra?', 'Cuéntame más cuando quieras.', 'Esto me sirve para recomendarte mejor.']),
       { sugerencias: ['Pregúntame otra', '¿Qué recuerdas de mí?', 'Dame ideas'] });
+  }
+
+  // ---- 2e. La respuesta al dato que el duende pidio ----------------------
+  // Si en el turno anterior pregunto "que talla usas?", esto es la respuesta:
+  // se guarda en el perfil y se dice que mas falta, sin volver a preguntarlo
+  // todo. La columna NUNCA viene del texto del usuario: solo puede ser una de
+  // las de CONDICIONES_REGALO.
+  else if (espera && espera.tipo === 'completar') {
+    intencion = 'completar';
+    const cond = CONDICIONES_REGALO.find(c => c.clave === espera.clave);
+    const valor = t.replace(/^(es|son|uso|mi|la|el)\s+/i, '').trim().slice(0, 200);
+    if (!cond || valor.length < (cond ? (cond.min || 2) : 2) || /^(no se|nada|ninguno|ninguna|despues|luego|no quiero)$/i.test(valor)) {
+      r = salida('Sin problema, lo dejamos para después \u{1F60C} Cuando quieras me lo dices.');
+    } else {
+      await run(`UPDATE usuarios SET ${cond.clave} = ? WHERE id = ?`, [valor, user.id]);
+      if (cond.clave === 'gustos' || cond.clave === 'hobbies') {
+        for (const c of extraerCosas('me gusta ' + valor)) {
+          await knn.aprender({ usuarioId: user.id, tipo: 'gusta', valor: c, origen: 'chat', peso: 0.9 });
+        }
+      }
+      if (cond.clave === 'no_gustos') {
+        for (const c of extraerCosas('no me gusta ' + valor)) {
+          await knn.aprender({ usuarioId: user.id, tipo: 'no_gusta', valor: c, origen: 'chat', peso: 0.9 });
+        }
+      }
+      if (cond.clave === 'deseo1') await guardarDeseo(user.id, valor);
+
+      const fresco = await get('SELECT * FROM usuarios WHERE id = ?', [user.id]);
+      const mios = await deseosDe(user.id);
+      const resto = queFalta(fresco || user, mios);
+      r = salida(
+        `¡Listo! Lo guardé: <b>${valor}</b> \u{2705}<br>` +
+        (resto.length
+          ? `<span class="porque">Con esto tu perfil mejora bastante. Si te animas, lo siguiente que más ayudaría es: ${resto[0].pide.toLowerCase()}.</span>`
+          : '<span class="porque">Y con eso tu perfil queda <b>completo</b>. Quien te saque la va a tener facilísima \u{1F381}</span>'),
+        {
+          espera: resto.length ? { tipo: 'completar', clave: resto[0].clave } : null,
+          sugerencias: resto.length ? ['Dale, sigue', 'Ya está bien', '¿Qué sabes de mí?'] : ['¿Qué sabes de mí?', 'Dame ideas']
+        });
+    }
   }
 
   // ---- 3. MEMORIA: mensaje publico para el grupo -------------------------
@@ -670,7 +923,11 @@ async function responder({ user, amigo, texto, ctx = {}, espera = null }) {
   }
 
   // ---- 9. Contagio emocional: si viene triste, primero lo acompana -------
-  else if (sent.emocion === 'triste' && !RX.ideas.test(t) && !RX.recado.test(t) && !RX.grupo.test(t)) {
+  // El lexico de sentimiento se queda corto con algunas formas de decirlo
+  // («tengo pena», «me siento vacio»), asi que tambien vale que lo diga de
+  // frente: RX.triste lo reconoce por el lexico comprensivo.
+  else if ((sent.emocion === 'triste' || RX.triste.test(t)) &&
+           !RX.ideas.test(t) && !RX.recado.test(t) && !RX.grupo.test(t)) {
     intencion = 'animoTriste';
     const consuelo = navidad.consultar(t.length > 12 ? t : 'tristeza extranar navidad soledad', 1);
     await memoria.recordar({ usuarioId: user.id, tipo: 'emocion', texto: t, visibilidad: 'privado', animo: sent.valencia });
@@ -685,7 +942,8 @@ async function responder({ user, amigo, texto, ctx = {}, espera = null }) {
       { sugerencias: ['Cuéntame algo bonito', 'Juguemos algo', 'Dame ideas'] });
   }
 
-  else if (sent.emocion === 'feliz' && sent.intensidad > 0.6 && !RX.ideas.test(t) && !RX.quiero.test(t)) {
+  else if (((sent.emocion === 'feliz' && sent.intensidad > 0.6) || RX.feliz.test(t)) &&
+           !RX.ideas.test(t) && !RX.quiero.test(t)) {
     intencion = 'animoAlegre';
     evento = 'mimo';
     await memoria.recordar({ usuarioId: user.id, tipo: 'emocion', texto: t, visibilidad: 'privado', animo: sent.valencia });
@@ -766,25 +1024,83 @@ async function responder({ user, amigo, texto, ctx = {}, espera = null }) {
     }
   }
 
-  // ---- 15. "No me gusta..." ----------------------------------------------
-  else if (RX.noQuiero.test(t)) {
-    intencion = 'noQuiero';
-    const cosas = extraerCosas(t);
-    for (const c of cosas) await knn.aprender({ usuarioId: user.id, tipo: 'no_gusta', valor: c, origen: 'chat' });
-    r = salida(cosas.length
-      ? `Entendido, nada de <b>${cosas.join('</b>, <b>')}</b> ❌ Lo tacho de tu perfil para que no te lo regalen.`
-      : '¿Qué es lo que no te gusta? Así evito recomendarlo.');
+  // ---- 15. GUSTOS PROPIOS: con negacion, certeza y por clausulas --------
+  // Antes habia dos ramas, "quiero" y "no quiero", y la que entraba primero se
+  // llevaba la frase entera. Eso hacia que "no me gustan los chocolates pero
+  // amo el cafe" quedara guardado del reves.
+  //
+  // Ahora manda el analisis por clausulas: cada trozo lleva su propio signo y
+  // su propia certeza, que se usa como PESO al aprender. Si la persona dudo
+  // ("creo que me gusta"), la senal pesa menos que si lo afirmo.
+  else if (comp.gustos.length && !RX.recado.test(t) && !RX.ideas.test(t) && !RX.contar.test(t)) {
+    const buenos = comp.gustos.filter(g => !META.test(g.valor));
+    if (!buenos.length) {
+      r = salida('Cuéntame qué te gusta de verdad y lo anoto \u{1F4DD}');
+    } else {
+      intencion = buenos.some(g => g.tipo === 'no_gusta') ? 'noQuiero' : 'quiero';
+      const si = [], no = [], dudosos = [];
+      for (const g of buenos) {
+        if (g.tipo === 'gusta') {
+          await guardarDeseo(user.id, g.valor);
+          await knn.aprender({
+            usuarioId: user.id, tipo: 'gusta', valor: g.valor, origen: 'chat', peso: g.certeza
+          });
+          si.push(g.valor);
+        } else {
+          await knn.aprender({
+            usuarioId: user.id, tipo: 'no_gusta', valor: g.valor, origen: 'chat', peso: g.certeza
+          });
+          no.push(g.valor);
+        }
+        if (g.duda) dudosos.push(g.valor);
+      }
+      const mios = await deseosDe(user.id);
+      const trozos = [];
+      if (si.length) trozos.push(`Anotado \u{1F4DD} <b>${si.join('</b>, <b>')}</b> va a tu lista.`);
+      if (no.length) trozos.push(`Y nada de <b>${no.join('</b>, <b>')}</b> \u{274C} lo tacho para que no te lo regalen.`);
+      if (dudosos.length) {
+        trozos.push(`Lo de <b>${dudosos.join('</b>, <b>')}</b> lo guardo flojito, porque te oí dudar \u{1F914} ` +
+          'Si me lo confirmas le subo el peso.');
+      }
+      if (si.length) trozos.push(`Ya llevas <b>${mios.length}</b> cosa(s) en tu lista. Solo lo ve quien te sacó \u{1F512}`);
+      r = salida(trozos.join('<br>'), {
+        sugerencias: no.length ? ['Y me gusta...', '¿Qué sabes de mí?'] : ['Tampoco quiero...', '¿Qué sabes de mí?']
+      });
+    }
   }
 
-  // ---- 16. "Quiero..." ---------------------------------------------------
-  else if (RX.quiero.test(t)) {
-    intencion = 'quiero';
-    const cosas = extraerCosas(t);
-    for (const c of cosas) await guardarDeseo(user.id, c);
+  // ---- 16. "Que hago?": consejos ---------------------------------------
+  // El duende no solo responde, tambien aconseja. Y para aconsejar bien usa el
+  // encadenamiento hacia atras: mira que le falta al perfil de quien pregunta
+  // y le dice lo UNICO que de verdad cambiaria las cosas, en vez de recitarle
+  // una lista de siete pendientes.
+  else if (RX.consejo.test(t)) {
+    intencion = 'consejo';
+    evento = 'pensando';
     const mios = await deseosDe(user.id);
-    r = salida(cosas.length
-      ? `¡Anotado! \u{1F4DD} Agregué <b>${cosas.join('</b>, <b>')}</b> a tu lista.<br>Ya llevas <b>${mios.length}</b> cosa(s). Solo lo ve quien te sacó \u{1F512}`
-      : '¿Qué te gustaría recibir? Dímelo y lo anoto en tu lista secreta.');
+    const falta = queFalta(user, mios);
+    const cab = alAzar([
+      `Te lo digo de corazón, <b>${corto(user)}</b> \u{1F9DD}`,
+      `Mi consejo de duende viejo \u{2728}`,
+      `A ver, te aconsejo esto \u{1F4AD}`
+    ]);
+    if (falta.length) {
+      const primero = falta[0];
+      r = salida(
+        `${cab}<br>Lo que más te conviene ahora mismo: <b>${primero.pide}</b>.<br>` +
+        `<span class="porque">Te lo digo porque ${primero.falta}, y eso es justo lo que más ` +
+        `le serviría a quien te saque en el sorteo. ` +
+        (falta.length > 1 ? `Después vemos lo demás (${falta.length - 1} cosita(s) más), pero esto primero.` : 'Con eso ya estarías completo.') +
+        '</span>',
+        { espera: { tipo: 'completar', clave: primero.clave }, sugerencias: ['Dale, te cuento', 'Mejor dame ideas', '¿Qué sabes de mí?'] });
+    } else {
+      r = salida(
+        `${cab}<br>Tu perfil está <b>completo</b>, así que mi consejo es otro: ` +
+        'no te compliques con el precio. Lo que se recuerda de un regalo es que ' +
+        'alguien se acordó de ti, no cuánto costó.<br>' +
+        '<span class="porque">Si quieres, escríbele algo bonito a alguien del grupo y yo se lo llevo \u{1F48C}</span>',
+        { sugerencias: ['Dile algo a alguien', 'Cuéntame algo', '¿Con quién me parezco?'] });
+    }
   }
 
   // ---- 17. Sobre MI amigo secreto (solo el propio) -----------------------
@@ -914,6 +1230,15 @@ async function responder({ user, amigo, texto, ctx = {}, espera = null }) {
     intencion = r._intencion || null;
     evento = r._evento || null;
     delete r._intencion; delete r._evento;
+  }
+
+  // ---- lo que tuvo que leer entre lineas ---------------------------------
+  // Si para entender la frase hubo que corregir ortografia, el duende lo dice.
+  // Solo cuando ENTENDIO algo (hay intencion), para no dar la nota cuando ya
+  // esta perdido de todas formas.
+  if (intencion && r && r.texto && !r.dormido) {
+    const nota = notaDeLectura(comp);
+    if (nota && r.texto.length < 1200) r.texto += nota;
   }
 
   // ---- emocion y memoria del turno ---------------------------------------
@@ -1063,10 +1388,111 @@ async function loQueSeDeTi(userId) {
   };
 }
 
+// --------------------------------------------------------------------------
+// LO QUE EL DUENDE DICE SIN QUE LE PREGUNTEN
+// --------------------------------------------------------------------------
+/**
+ * Un duende que solo contesta no es un amigo, es un buscador. Esto es lo que
+ * se le ocurre decir al verte entrar: un consejo, un recuerdo tuyo, algo del
+ * grupo o una idea sobre la Navidad.
+ *
+ * El orden no es al azar. Primero lo UTIL (lo que le falta a tu perfil, que es
+ * lo que de verdad cambia el regalo que te van a hacer); cuando ya no falta
+ * nada, lo bonito.
+ *
+ * Nunca habla del sorteo de nadie, y lo que recuerda es solo tuyo.
+ *
+ * @returns {Promise<object|null>} { texto, tipo } o null si esta dormido
+ */
+/**
+ * Las ultimas notas que le solto a cada persona, para no repetirse en la misma
+ * visita. Vive en memoria y se olvida al reiniciar el servidor, que es justo
+ * lo que se quiere: al dia siguiente puede volver a contar lo mismo.
+ */
+const NOTAS_DICHAS = new Map();
+
+async function mensajeEspontaneo(user, ctx = {}) {
+  const est = await animo.estado(user.id);
+  if (est.dormido) return null;
+
+  const mios = await deseosDe(user.id);
+  const falta = queFalta(user, mios);
+  const yaDicho = NOTAS_DICHAS.get(user.id) || [];
+
+  const opciones = [];
+
+  // 1. lo util: que le falta a su perfil
+  if (falta.length) {
+    opciones.push({
+      peso: 3, tipo: 'consejo', clave: 'falta:' + falta[0].clave,
+      texto: alAzar([
+        `Oye \u{1F440} ${falta[0].falta}. ${falta[0].pide}?`,
+        `Un dato: ${falta[0].falta}, y eso es justo lo que más le serviría a quien te saque. ${falta[0].pide}?`,
+        `Si me ayudas con una cosita: ${falta[0].pide.toLowerCase()}. ${falta[0].falta} \u{1F381}`
+      ])
+    });
+  }
+
+  // 2. algo que me contaste
+  const recuerdos = (await memoria.memoriasDe(user.id, { tipo: 'dato', limite: 6 })).slice(0, 4);
+  if (recuerdos.length) {
+    const rec = alAzar(recuerdos);
+    opciones.push({
+      peso: 2, tipo: 'recuerdo', clave: 'rec:' + rec.id,
+      texto: alAzar([
+        `Me acordé de algo tuyo: <i>«${rec.texto}»</i> \u{1F9E0}`,
+        `Seguí pensando en lo que me contaste: <i>«${rec.texto}»</i>. No se me olvida.`,
+        `Lo tengo apuntado, por si acaso: <i>«${rec.texto}»</i> \u{1F4DD}`
+      ])
+    });
+  }
+
+  // 3. el grupo
+  const faltanPersonas = Math.max(0, (ctx.max || 8) - (ctx.total || 0));
+  if (faltanPersonas > 0) {
+    opciones.push({
+      peso: 1, tipo: 'grupo', clave: 'grupo:' + faltanPersonas,
+      texto: `Faltan <b>${faltanPersonas}</b> amigo(s) para que salga el sorteo \u{1F3B2} Yo ya estoy nervioso.`
+    });
+  } else if (ctx.sorteoHecho) {
+    opciones.push({
+      peso: 1, tipo: 'grupo', clave: 'grupo:listo',
+      texto: 'Ya está todo sorteado \u{1F381} Si quieres te doy ideas para tu amigo secreto.'
+    });
+  }
+
+  // 4. lo que piensa de la Navidad
+  opciones.push({
+    peso: 1, tipo: 'mundo', clave: 'mundo:' + ((Date.now() / 86400000) | 0),
+    texto: navidad.reflexion()
+  });
+
+  // 5. como se siente hoy
+  opciones.push({
+    peso: 1, tipo: 'animo', clave: 'animo:' + est.estado,
+    texto: `Hoy ando <b>${est.etiqueta}</b> ${est.emoji}. ¿Y tú cómo vas?`
+  });
+
+  // lo ya dicho pesa la mitad, para que no repita lo mismo cada vez que entras
+  const sorteables = [];
+  for (const o of opciones) {
+    const peso = yaDicho.indexOf(o.clave) >= 0 ? o.peso * 0.3 : o.peso;
+    for (let i = 0; i < Math.max(1, Math.round(peso * 10)); i++) sorteables.push(o);
+  }
+  const elegido = alAzar(sorteables);
+  if (!elegido) return null;
+
+  // se apunta lo dicho para no repetirlo en la misma visita
+  const dichas = yaDicho.concat([elegido.clave]).slice(-6);
+  NOTAS_DICHAS.set(user.id, dichas);
+
+  return { texto: elegido.texto, tipo: elegido.tipo, animo: est };
+}
+
 module.exports = {
   responder, historial, guardarChat, guardarDeseo, deseosDe,
   dejarRecado, recadosDe, marcarRecadoEntregado, revelaSorteo,
   reaccionarGesto, gestosDe, loQueSeDeTi,
-  cargarAprendizaje, aprenderIntencion,
+  cargarAprendizaje, aprenderIntencion, mensajeEspontaneo, queFalta,
   CATALOGO: knn.CATALOGO
 };

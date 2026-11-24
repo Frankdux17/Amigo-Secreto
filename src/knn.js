@@ -402,22 +402,28 @@ async function recomendar(destinoId, { k = 3, n = 4, excluir = [] } = {}) {
  * de duplicar la fila: así "repetir" equivale a "reforzar", que es justo lo
  * que queremos que signifique.
  */
-async function aprender({ usuarioId, tipo = 'gusta', valor, origen = 'chat', autorId = null }) {
+async function aprender({ usuarioId, tipo = 'gusta', valor, origen = 'chat', autorId = null, peso = 1 }) {
   const v = String(valor || '').trim().slice(0, 120);
   if (v.length < 2) return null;
+
+  // El peso es la CERTEZA con la que se dijo (lo trae comprension.js). Afirmar
+  // "me encanta el cafe" pesa 0.9; dudar ("creo que me gusta") pesa 0.6. Asi
+  // una duda no cuenta igual que una afirmacion a la hora de recomendar.
+  const w = Math.max(0.2, Math.min(2, Number(peso) || 1));
+
   const ya = await get(
     'SELECT id, peso FROM senales WHERE usuario_id = ? AND tipo = ? AND lower(valor) = lower(?)',
     [usuarioId, tipo, v]
   );
   if (ya) {
-    await run('UPDATE senales SET peso = peso + 1 WHERE id = ?', [ya.id]);
-    return { id: ya.id, reforzada: true };
+    await run('UPDATE senales SET peso = peso + ? WHERE id = ?', [w, ya.id]);
+    return { id: ya.id, reforzada: true, peso: Number(ya.peso) + w };
   }
   const r = await run(
-    'INSERT INTO senales (usuario_id, tipo, valor, peso, origen, autor_id) VALUES (?, ?, ?, 1, ?, ?)',
-    [usuarioId, tipo, v, origen, autorId]
+    'INSERT INTO senales (usuario_id, tipo, valor, peso, origen, autor_id) VALUES (?, ?, ?, ?, ?, ?)',
+    [usuarioId, tipo, v, w, origen, autorId]
   );
-  return { id: r.lastInsertRowid, reforzada: false };
+  return { id: r.lastInsertRowid, reforzada: false, peso: w };
 }
 
 /** Todo lo aprendido sobre alguien, lo más reforzado primero. */

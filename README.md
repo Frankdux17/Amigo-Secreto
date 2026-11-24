@@ -104,6 +104,62 @@ Un personaje animado en SVG (camina, saluda, parpadea, le suena el pompón) acom
   de sentido y ángulo acumulado— para distinguir una **caricia** (lenta, de ida y vuelta) de una
   **sacudida** (rápida) o de una **vuelta** completa a su alrededor. También se da cuenta si te
   fuiste y si volviste.
+- **Entiende aunque se escriba como se habla** (`src/comprension.js`). Esta parte es la
+  adaptación al duende del analizador de lenguaje de **TecniBot IA**, mi proyecto del curso de
+  Ciencias Cognitivas del Lenguaje (donde convivía con un sistema experto de 109 reglas). Son
+  los mismos cinco pasos, con el mismo criterio de fondo: la persona escribe como habla, no
+  como un formulario.
+
+  1. **Normalizar**: minúsculas, sin tildes, sin signos.
+  2. **Partir en cláusulas** por comas, puntos y *«pero»*, para que una negación no contamine
+     toda la frase. Es lo que hace que *«no me gustan los chocolates pero amo el café»* se
+     guarde como lo que es: dos cosas de signo contrario. Antes se guardaba al revés.
+  3. **Corregir lo mal escrito** con el *ratio* de `difflib` portado a JavaScript
+     (`nlp.ratio`, que es la medida de `SequenceMatcher`, no Levenshtein): *«rgalo»* →
+     *«regalo»*, *«chcolate»* → *«chocolate»*. Da los mismos números que en Python
+     (`qemado`/`quemado` = 0.923). Antes de eso se desarman las abreviaturas del chat de aquí:
+     *kien, ke, xq, pa, tmb, toy, grax, amix, oe, pe*.
+  4. **Patrones flexibles**: cada palabra del patrón es una **raíz** (`regal` reconoce regalo,
+     regalos, regalarle), entre palabra y palabra caben hasta dos de relleno, y los conectores
+     cortos son opcionales —así *«vete a dormir»* también entiende *«vete dormir»*. Las
+     palabras de tres letras o menos tienen que coincidir exactas, para no disparar de más.
+  5. **Interpretar como una persona**: la **negación** da la vuelta al significado mirando hasta
+     cuatro palabras atrás; la **duda** (*«creo que»*, *«a veces»*) baja la certeza a 0.6; y los
+     **números** se leen (*«talla M»*, *«zapato 42»*, *«hasta 80 soles»*).
+
+  Todo sale con **certeza**, y cuando dos evidencias apuntan a lo mismo se combinan con la
+  fórmula de **MYCIN** (`FC = a + b·(1−a)`): decir dos veces que te gusta el café sube la
+  confianza sin pasarse nunca de 1. Esa certeza se usa como **peso** al aprender, así que una
+  duda no cuenta igual que una afirmación a la hora de recomendarte un regalo.
+
+  Las expresiones literales de siempre no se tiraron: cada detector tiene **dos pisos**, primero
+  el literal (barato y exacto) y, si falla, el comprensivo (con certeza). La privacidad del
+  sorteo ganó con esto, porque ahora *«a kien le toco»* se reconoce igual que *«a quién le tocó»*.
+
+- **Enseña lo que leyó entre líneas.** Si tuvo que corregir ortografía para entenderte, lo dice:
+  *«Por si acaso: leí «chcolate» como «chocolate» 👀»*. Sirve para que veas que te entendió —y no
+  que acertó de casualidad— y para que puedas desmentirlo.
+
+- **Pregunta lo justo, no un cuestionario** (`queFalta()` en `src/bot.js`). También viene de
+  TecniBot: en vez de recitarte todas las preguntas, parte de la **conclusión** a la que quiere
+  llegar (*«puedo recomendar un regalo buenísimo para esta persona»*), mira cuál de sus
+  condiciones te falta y pregunta **una sola**, la que más cambia el resultado. Cuando la
+  contestas, la guarda y pasa a la siguiente —o te dice que ya estás completo.
+
+- **Aconseja.** *«dame un consejo»*, *«¿qué hago?»* y te dice lo único que de verdad te conviene
+  ahora mismo, explicando el por qué. Con el perfil completo cambia de tema: te recuerda que de
+  un regalo se recuerda que alguien se acordó de ti, no cuánto costó.
+
+- **Habla sin que le preguntes** (`mensajeEspontaneo()`). Al entrar te recibe con algo suyo: un
+  consejo, un recuerdo tuyo, cómo va el grupo, una idea sobre la Navidad o cómo anda de ánimo.
+  Primero lo útil y después lo bonito, y no se repite en la misma visita.
+
+- **Juega con el cursor.** Si se lo persigues, **se aparta de un brinco**; a la tercera se deja
+  pillar y se ríe. Un duende que nunca se deja atrapar deja de tener gracia.
+
+- **Mira su entorno.** No el cuarto: **su página**. Si llevas un rato parado en la lista de
+  amigos, en tu perfil o en los datos del evento, comenta eso y no una frase suelta.
+
 - **Obedece.** *«descansa un rato»* / *«vete a dormir»* y se acurruca con sus zZz (deja de hablar
   y de pasearse); *«despierta»* o un toque y sale de un salto; *«deja de hablar»* le quita la voz
   sin quitarle el chat. Los mismos cuatro botones están en el panel.
@@ -258,7 +314,10 @@ amigo-secreto/
 │   ├── sorteo.js          # algoritmo del sorteo (ciclo único aleatorio)
 │   ├── bot.js             # el cerebro del duende: intenciones y conversación
 │   ├── knn.js             # aprendizaje de gustos (k-NN + filtrado colaborativo)
-│   ├── nlp.js             # lenguaje: stemmer, Levenshtein, TF-IDF, Naive Bayes,
+│   ├── comprension.js     # entender lo que quisiste decir: cláusulas, corrección
+│   │                     con difflib, raíces, negación, duda y certezas MYCIN
+│   ├── nlp.js             # lenguaje: stemmer, Levenshtein, difflib, TF-IDF (palabras
+│   │                     y n-gramas de letras), Naive Bayes,
 │   │                      #   análisis de sentimiento, Markov y resumen extractivo
 │   ├── memoria.js         # memoria de corto y largo plazo, con curva de olvido
 │   ├── animo.js           # emociones: valencia, energía y máquina de estados
